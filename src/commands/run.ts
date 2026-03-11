@@ -27,16 +27,17 @@ export default defineCommand({
       alias: 'f',
     },
   },
-  async run({ args }) {
+  async run({ args, rawArgs }) {
     const root = await getProjectRoot();
     const config = loadConfig(root);
     const cmdConfig = findCommand(config, args.command);
     const scope = cmdConfig.scope ?? 'feature';
+    const extraArgs = extractExtraArgs(rawArgs);
 
     if (scope === 'project') {
-      await runProjectScoped(root, config, cmdConfig);
+      await runProjectScoped(root, config, cmdConfig, extraArgs);
     } else {
-      await runFeatureScoped(root, config, cmdConfig, args.feature as string | undefined);
+      await runFeatureScoped(root, config, cmdConfig, args.feature as string | undefined, extraArgs);
     }
   },
 });
@@ -46,6 +47,7 @@ async function runFeatureScoped(
   config: WtConfig,
   cmdConfig: CommandConfig,
   featureArg: string | undefined,
+  extraArgs: string[],
 ): Promise<void> {
   const feature = resolveFeature(featureArg, config.worktrees.dir, cmdConfig.name);
   const treePath = getWorktreePath(root, config.worktrees.dir, feature);
@@ -60,7 +62,10 @@ async function runFeatureScoped(
     basePort: ports[0] ?? 0,
   };
 
-  const command = resolveRelativePath(cmdConfig.command, join(treePath, '.wt'));
+  let command = resolveRelativePath(cmdConfig.command, join(treePath, '.wt'));
+  if (extraArgs.length > 0) {
+    command = `${command} ${shellEscape(extraArgs)}`;
+  }
 
   consola.start(`Running "${cmdConfig.name}" for feature: ${feature}`);
   await runCommand(command, context, treePath);
@@ -71,6 +76,7 @@ async function runProjectScoped(
   root: string,
   config: WtConfig,
   cmdConfig: CommandConfig,
+  extraArgs: string[],
 ): Promise<void> {
   const context: ScriptContext = {
     root,
@@ -81,11 +87,26 @@ async function runProjectScoped(
     basePort: 0,
   };
 
-  const command = resolveRelativePath(cmdConfig.command, join(root, '.wt'));
+  let command = resolveRelativePath(cmdConfig.command, join(root, '.wt'));
+  if (extraArgs.length > 0) {
+    command = `${command} ${shellEscape(extraArgs)}`;
+  }
 
   consola.start(`Running "${cmdConfig.name}"`);
   await runCommand(command, context, root);
   await runHooks('run', context);
+}
+
+/** @internal */
+export function extractExtraArgs(rawArgs: string[]): string[] {
+  const dashIndex = rawArgs.indexOf('--');
+  if (dashIndex === -1) return [];
+  return rawArgs.slice(dashIndex + 1);
+}
+
+/** @internal */
+export function shellEscape(args: string[]): string {
+  return args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
 }
 
 /** @internal */

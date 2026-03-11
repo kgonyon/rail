@@ -1,3 +1,4 @@
+import { existsSync } from 'fs';
 import { defineCommand } from 'citty';
 import consola from 'consola';
 import { getProjectRoot, getWorktreePath } from '../lib/paths';
@@ -28,6 +29,13 @@ export default defineCommand({
 
     const feature = resolveFeature(args.feature as string | undefined, config.worktrees.dir);
     const treePath = getWorktreePath(root, config.worktrees.dir, feature);
+
+    if (!existsSync(treePath)) {
+      throw new Error(
+        `No worktree found for feature "${feature}" at ${treePath}. Check the feature name with "wt status".`,
+      );
+    }
+
     const ports = lookupPorts(root, feature, config);
 
     const context: ScriptContext = {

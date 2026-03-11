@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { findCommand } from './run';
+import { findCommand, extractExtraArgs, shellEscape } from './run';
 import type { WtConfig } from '../types/config';
 
 function makeConfig(commands?: WtConfig['commands']): WtConfig {
@@ -41,5 +41,61 @@ describe('findCommand', () => {
   it('throws for empty commands array', () => {
     const config = makeConfig([]);
     expect(() => findCommand(config, 'dev')).toThrow('Unknown command "dev"');
+  });
+});
+
+describe('extractExtraArgs', () => {
+  it('returns empty array when no -- present', () => {
+    expect(extractExtraArgs(['dev', '-f', 'my-feature'])).toEqual([]);
+  });
+
+  it('returns args after --', () => {
+    expect(extractExtraArgs(['dev', '--', '--tunnel'])).toEqual(['--tunnel']);
+  });
+
+  it('returns multiple args after --', () => {
+    expect(extractExtraArgs(['dev', '--', '--tunnel', '--port', '4000'])).toEqual([
+      '--tunnel',
+      '--port',
+      '4000',
+    ]);
+  });
+
+  it('returns empty array when -- is last element', () => {
+    expect(extractExtraArgs(['dev', '--'])).toEqual([]);
+  });
+
+  it('returns empty array for empty input', () => {
+    expect(extractExtraArgs([])).toEqual([]);
+  });
+
+  it('uses only the first -- separator', () => {
+    expect(extractExtraArgs(['dev', '--', '--flag', '--', 'value'])).toEqual([
+      '--flag',
+      '--',
+      'value',
+    ]);
+  });
+});
+
+describe('shellEscape', () => {
+  it('wraps a simple flag in single quotes', () => {
+    expect(shellEscape(['--tunnel'])).toBe("'--tunnel'");
+  });
+
+  it('handles args with spaces', () => {
+    expect(shellEscape(['hello world'])).toBe("'hello world'");
+  });
+
+  it('escapes single quotes in args', () => {
+    expect(shellEscape(["it's"])).toBe("'it'\\''s'");
+  });
+
+  it('joins multiple args with spaces', () => {
+    expect(shellEscape(['--a', '--b'])).toBe("'--a' '--b'");
+  });
+
+  it('returns empty string for empty array', () => {
+    expect(shellEscape([])).toBe('');
   });
 });

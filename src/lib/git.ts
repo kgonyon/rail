@@ -139,6 +139,38 @@ const CLEAN_STATS: WorktreeStats = {
   isDirty: false,
 };
 
+export async function detectDefaultBranch(root: string): Promise<string> {
+  try {
+    const result = await $`git -C ${root} symbolic-ref refs/remotes/origin/HEAD`.quiet();
+    const ref = result.text().trim();
+    return ref.replace('refs/remotes/origin/', '');
+  } catch {
+    return 'main';
+  }
+}
+
+export async function refreshFromOrigin(root: string): Promise<void> {
+  const { isDirty } = await getWorktreeStats(root);
+  if (isDirty) {
+    throw new Error(
+      'Uncommitted changes detected. Commit or stash them before refreshing.',
+    );
+  }
+
+  const branch = await detectDefaultBranch(root);
+
+  consola.start(`Pulling origin/${branch}...`);
+
+  const result = await $`git -C ${root} pull origin ${branch}`.quiet();
+  const output = result.text().trim();
+
+  if (output) {
+    consola.info(output);
+  }
+
+  consola.success(`Pulled latest from origin/${branch}`);
+}
+
 export async function getWorktreeStats(treePath: string): Promise<WorktreeStats> {
   let porcelainOutput: string;
   try {

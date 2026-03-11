@@ -3,7 +3,7 @@ import consola from 'consola';
 import { getProjectRoot, getWorktreePath } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { allocatePorts, getPortsForFeature } from '../lib/ports';
-import { addWorktree } from '../lib/git';
+import { addWorktree, refreshFromOrigin } from '../lib/git';
 import { generateEnvFiles } from '../lib/env';
 import { runHooks } from '../lib/hooks';
 import { runScript } from '../lib/script';
@@ -25,6 +25,8 @@ export default defineCommand({
     const feature = args.feature;
     const root = await getProjectRoot();
     const config = loadConfig(root);
+
+    await refreshFromOrigin(root);
 
     const index = allocatePorts(root, feature, config.port);
     const ports = getPortsForFeature(config.port, index);

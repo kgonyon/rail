@@ -32,7 +32,7 @@ export default defineCommand({
 
     if (!existsSync(treePath)) {
       throw new Error(
-        `No worktree found for feature "${feature}" at ${treePath}. Check the feature name with "wt status".`,
+        `No worktree found for feature "${feature}" at ${treePath}. Check the feature name with "rail status".`,
       );
     }
 

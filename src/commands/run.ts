@@ -8,7 +8,7 @@ import { resolveFeature } from '../lib/detect';
 import { runHooks } from '../lib/hooks';
 import { runCommand } from '../lib/script';
 import type { ScriptContext } from '../lib/script';
-import type { WtConfig, CommandConfig } from '../types/config';
+import type { RailConfig, CommandConfig } from '../types/config';
 
 export default defineCommand({
   meta: {
@@ -44,7 +44,7 @@ export default defineCommand({
 
 async function runFeatureScoped(
   root: string,
-  config: WtConfig,
+  config: RailConfig,
   cmdConfig: CommandConfig,
   featureArg: string | undefined,
   extraArgs: string[],
@@ -62,7 +62,7 @@ async function runFeatureScoped(
     basePort: ports[0] ?? 0,
   };
 
-  let command = resolveRelativePath(cmdConfig.command, join(treePath, '.wt'));
+  let command = resolveRelativePath(cmdConfig.command, join(treePath, '.rail'));
   if (extraArgs.length > 0) {
     command = `${command} ${shellEscape(extraArgs)}`;
   }
@@ -74,7 +74,7 @@ async function runFeatureScoped(
 
 async function runProjectScoped(
   root: string,
-  config: WtConfig,
+  config: RailConfig,
   cmdConfig: CommandConfig,
   extraArgs: string[],
 ): Promise<void> {
@@ -87,7 +87,7 @@ async function runProjectScoped(
     basePort: 0,
   };
 
-  let command = resolveRelativePath(cmdConfig.command, join(root, '.wt'));
+  let command = resolveRelativePath(cmdConfig.command, join(root, '.rail'));
   if (extraArgs.length > 0) {
     command = `${command} ${shellEscape(extraArgs)}`;
   }
@@ -110,7 +110,7 @@ export function shellEscape(args: string[]): string {
 }
 
 /** @internal */
-export function findCommand(config: WtConfig, name: string): CommandConfig {
+export function findCommand(config: RailConfig, name: string): CommandConfig {
   const cmd = config.commands?.find((c) => c.name === name);
 
   if (!cmd) {
@@ -121,12 +121,12 @@ export function findCommand(config: WtConfig, name: string): CommandConfig {
   return cmd;
 }
 
-function lookupPorts(root: string, feature: string, config: WtConfig): number[] {
+function lookupPorts(root: string, feature: string, config: RailConfig): number[] {
   const allocations = loadPortAllocations(root);
   const allocation = allocations.features[feature];
 
   if (!allocation) {
-    throw new Error(`No ports allocated for feature "${feature}". Run "wt up ${feature}" first.`);
+    throw new Error(`No ports allocated for feature "${feature}". Run "rail up ${feature}" first.`);
   }
 
   return getPortsForFeature(config.port, allocation.index);

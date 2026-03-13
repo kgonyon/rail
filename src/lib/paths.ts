@@ -23,11 +23,11 @@ export async function getGitRoot(): Promise<string> {
 
 export async function getProjectRoot(): Promise<string> {
   const gitRoot = await getGitRoot();
-  const configPath = join(gitRoot, '.wt', 'config.yaml');
+  const configPath = join(gitRoot, '.rail', 'config.yaml');
 
   if (!existsSync(configPath)) {
     throw new Error(
-      `No .wt/config.yaml found at ${gitRoot}. Initialize with a config file at .wt/config.yaml`,
+      `No .rail/config.yaml found at ${gitRoot}. Initialize with a config file at .rail/config.yaml`,
     );
   }
 
@@ -39,23 +39,23 @@ export function getWorktreePath(root: string, dir: string, feature: string): str
 }
 
 export function getConfigPath(root: string): string {
-  return join(root, '.wt', 'config.yaml');
+  return join(root, '.rail', 'config.yaml');
 }
 
 export function getLocalConfigPath(root: string): string {
-  return join(root, '.wt', 'local.yaml');
+  return join(root, '.rail', 'local.yaml');
 }
 
 export function getPortAllocationsPath(root: string): string {
-  return join(root, '.wt', 'port_allocations.json');
+  return join(root, '.rail', 'port_allocations.json');
 }
 
 export function getUserConfigPath(): string {
-  return join(homedir(), '.config', 'wt', 'config.yaml');
+  return join(homedir(), '.config', 'rail', 'config.yaml');
 }
 
-export function isWtProject(root: string): boolean {
-  return existsSync(join(root, '.wt', 'config.yaml'));
+export function isRailProject(root: string): boolean {
+  return existsSync(join(root, '.rail', 'config.yaml'));
 }
 
 export function isRelativePath(command: string): boolean {

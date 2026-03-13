@@ -30,7 +30,7 @@ export interface ScriptsConfig {
   cleanup?: string;
 }
 
-export interface WtConfig {
+export interface RailConfig {
   name: string;
   worktrees: WorktreesConfig;
   port: PortConfig;
@@ -38,6 +38,7 @@ export interface WtConfig {
   commands?: CommandConfig[];
   env_files?: EnvFile[];
   hooks?: HookConfig;
+  secrets?: Record<string, string>;
 }
 
 export interface PortAllocation {

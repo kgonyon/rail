@@ -9,7 +9,7 @@ describe('generateEnvFiles integration', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'wt-env-test-'));
+    tempDir = mkdtempSync(join(tmpdir(), 'rail-env-test-'));
   });
 
   afterEach(() => {
@@ -27,8 +27,8 @@ describe('generateEnvFiles integration', () => {
         source: '.env.template',
         dest: '.env',
         replace: {
-          PORT: '${WT_PORT_1}',
-          DATABASE_URL: 'postgres://localhost:${WT_PORT_2}/db',
+          PORT: '${RAIL_PORT_1}',
+          DATABASE_URL: 'postgres://localhost:${RAIL_PORT_2}/db',
         },
       },
     ];
@@ -50,7 +50,7 @@ describe('generateEnvFiles integration', () => {
         path: 'app',
         source: '.env.example',
         dest: '.env.local',
-        replace: { PORT: '${WT_PORT_1}' },
+        replace: { PORT: '${RAIL_PORT_1}' },
       },
     ];
 

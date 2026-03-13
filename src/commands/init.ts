@@ -3,18 +3,18 @@ import consola from 'consola';
 import { basename, join } from 'path';
 import { existsSync } from 'fs';
 import { mkdir, writeFile, appendFile, readFile, chmod } from 'fs/promises';
-import { getGitRoot, isWtProject } from '../lib/paths';
+import { getGitRoot, isRailProject } from '../lib/paths';
 
 export default defineCommand({
   meta: {
     name: 'init',
-    description: 'Initialize a new wt project with boilerplate config and scripts',
+    description: 'Initialize a new rail project with boilerplate config and scripts',
   },
   async run() {
     const root = await getGitRoot();
 
-    if (isWtProject(root)) {
-      throw new Error('Project already initialized. Config exists at .wt/config.yaml');
+    if (isRailProject(root)) {
+      throw new Error('Project already initialized. Config exists at .rail/config.yaml');
     }
 
     const projectName = basename(root);
@@ -25,30 +25,30 @@ export default defineCommand({
     await createCleanupScript(root);
     await updateGitignore(root);
 
-    consola.success('Initialized wt project');
+    consola.success('Initialized rail project');
     consola.box(
       [
         'Created:',
-        '  .wt/config.yaml',
-        '  .wt/scripts/setup.sh',
-        '  .wt/scripts/cleanup.sh',
+        '  .rail/config.yaml',
+        '  .rail/scripts/setup.sh',
+        '  .rail/scripts/cleanup.sh',
         '',
         'Next steps:',
-        '  1. Edit .wt/config.yaml to match your project',
+        '  1. Edit .rail/config.yaml to match your project',
         '  2. Customize the setup and cleanup scripts',
-        '  3. Run `wt up <feature>` to create your first worktree',
+        '  3. Run `rail up <feature>` to create your first worktree',
       ].join('\n'),
     );
   },
 });
 
 async function createDirectories(root: string): Promise<void> {
-  await mkdir(join(root, '.wt', 'scripts'), { recursive: true });
+  await mkdir(join(root, '.rail', 'scripts'), { recursive: true });
 }
 
 async function createConfigFile(root: string, projectName: string): Promise<void> {
-  const content = `# wt project configuration
-# Docs: https://github.com/nicholasgonyon/wt
+  const content = `# rail project configuration
+# Docs: https://github.com/kgonyon/rail
 
 name: ${projectName}
 
@@ -67,9 +67,9 @@ port:
   max: 100
 
 scripts:
-  # Run after worktree creation and env file generation (path relative to .wt/)
+  # Run after worktree creation and env file generation (path relative to .rail/)
   setup: scripts/setup.sh
-  # Run before worktree removal (path relative to .wt/)
+  # Run before worktree removal (path relative to .rail/)
   cleanup: scripts/cleanup.sh
 
 # commands:
@@ -83,7 +83,7 @@ scripts:
 #     source: .env.example
 #     dest: .env
 #     replace:
-#       PORT: "\${WT_PORT_1}"
+#       PORT: "\${RAIL_PORT_1}"
 
 # hooks:
 #   - event: up
@@ -94,7 +94,7 @@ scripts:
 #     command: echo "Command finished!"
 `;
 
-  await writeFile(join(root, '.wt', 'config.yaml'), content);
+  await writeFile(join(root, '.rail', 'config.yaml'), content);
 }
 
 async function createSetupScript(root: string): Promise<void> {
@@ -103,22 +103,22 @@ set -euo pipefail
 
 # ------------------------------------------------------------------
 # Setup script — runs after worktree creation and env file generation
-# during \`wt up <feature>\`.
+# during \`rail up <feature>\`.
 #
 # Available environment variables:
-#   WT_PROJECT      — Project name from config
-#   WT_PROJECT_DIR  — Absolute path to the project root
-#   WT_FEATURE      — Feature name (e.g., "my-feature")
-#   WT_FEATURE_DIR  — Absolute path to the feature worktree
-#   WT_PORT         — First allocated port (alias for WT_PORT_1)
-#   WT_PORT_1       — First allocated port
-#   WT_PORT_2       — Second allocated port
-#   WT_PORT_N       — Nth port (up to per_feature)
+#   RAIL_PROJECT      — Project name from config
+#   RAIL_PROJECT_DIR  — Absolute path to the project root
+#   RAIL_FEATURE      — Feature name (e.g., "my-feature")
+#   RAIL_FEATURE_DIR  — Absolute path to the feature worktree
+#   RAIL_PORT         — First allocated port (alias for RAIL_PORT_1)
+#   RAIL_PORT_1       — First allocated port
+#   RAIL_PORT_2       — Second allocated port
+#   RAIL_PORT_N       — Nth port (up to per_feature)
 #
 # Working directory is set to the feature worktree.
 # ------------------------------------------------------------------
 
-echo "Setting up feature: $WT_FEATURE"
+echo "Setting up feature: $RAIL_FEATURE"
 
 # Example: Install dependencies
 # npm install
@@ -130,7 +130,7 @@ echo "Setting up feature: $WT_FEATURE"
 # npm run db:seed
 `;
 
-  const scriptPath = join(root, '.wt', 'scripts', 'setup.sh');
+  const scriptPath = join(root, '.rail', 'scripts', 'setup.sh');
   await writeFile(scriptPath, content);
   await chmod(scriptPath, 0o755);
 }
@@ -140,25 +140,25 @@ async function createCleanupScript(root: string): Promise<void> {
 set -euo pipefail
 
 # ------------------------------------------------------------------
-# Cleanup script — runs before worktree removal during \`wt down\`.
+# Cleanup script — runs before worktree removal during \`rail down\`.
 #
 # Available environment variables:
-#   WT_PROJECT      — Project name from config
-#   WT_PROJECT_DIR  — Absolute path to the project root
-#   WT_FEATURE      — Feature name (e.g., "my-feature")
-#   WT_FEATURE_DIR  — Absolute path to the feature worktree
-#   WT_PORT         — First allocated port (alias for WT_PORT_1)
-#   WT_PORT_1       — First allocated port
-#   WT_PORT_2       — Second allocated port
-#   WT_PORT_N       — Nth port (up to per_feature)
+#   RAIL_PROJECT      — Project name from config
+#   RAIL_PROJECT_DIR  — Absolute path to the project root
+#   RAIL_FEATURE      — Feature name (e.g., "my-feature")
+#   RAIL_FEATURE_DIR  — Absolute path to the feature worktree
+#   RAIL_PORT         — First allocated port (alias for RAIL_PORT_1)
+#   RAIL_PORT_1       — First allocated port
+#   RAIL_PORT_2       — Second allocated port
+#   RAIL_PORT_N       — Nth port (up to per_feature)
 #
 # Working directory is set to the feature worktree.
 # ------------------------------------------------------------------
 
-echo "Cleaning up feature: $WT_FEATURE"
+echo "Cleaning up feature: $RAIL_FEATURE"
 
 # Example: Drop feature database
-# dropdb "myapp_\${WT_FEATURE}" --if-exists
+# dropdb "myapp_\${RAIL_FEATURE}" --if-exists
 
 # Example: Remove temporary files
 # rm -rf tmp/
@@ -167,14 +167,14 @@ echo "Cleaning up feature: $WT_FEATURE"
 # docker compose down
 `;
 
-  const scriptPath = join(root, '.wt', 'scripts', 'cleanup.sh');
+  const scriptPath = join(root, '.rail', 'scripts', 'cleanup.sh');
   await writeFile(scriptPath, content);
   await chmod(scriptPath, 0o755);
 }
 
 async function updateGitignore(root: string): Promise<void> {
   const gitignorePath = join(root, '.gitignore');
-  const entries = ['.wt/local.yaml', '.wt/port_allocations.json'];
+  const entries = ['.rail/local.yaml', '.rail/port_allocations.json'];
 
   const existing = existsSync(gitignorePath)
     ? await readFile(gitignorePath, 'utf-8')
@@ -185,7 +185,7 @@ async function updateGitignore(root: string): Promise<void> {
   if (missing.length === 0) return;
 
   const prefix = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';
-  const block = `${prefix}\n# wt local files\n${missing.join('\n')}\n`;
+  const block = `${prefix}\n# rail local files\n${missing.join('\n')}\n`;
 
   await appendFile(gitignorePath, block);
 }

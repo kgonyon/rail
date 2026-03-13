@@ -1,14 +1,14 @@
 {
-  "name": "wt",
+  "name": "rail",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "bun run src/cli.ts",
-    "build": "bun build --compile --minify src/cli.ts --outfile dist/wt",
+    "build": "bun build --compile --minify src/cli.ts --outfile dist/rail",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "install:local": "bun run build && ln -sf $(pwd)/dist/wt ~/.bun/bin/wt"
+    "install:local": "bun run build && ln -sf $(pwd)/dist/rail ~/.bun/bin/rail"
   },
   "dependencies": {
     "citty": "^0.2.0",

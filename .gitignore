@@ -1,6 +1,5 @@
 node_modules/
 dist/
 
-# wt local files
-.wt/local.yaml
-.wt/port_allocations.json
+# rail local files
+.rail/

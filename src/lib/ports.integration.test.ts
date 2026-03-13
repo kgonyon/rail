@@ -15,7 +15,7 @@ describe('port allocation integration', () => {
   let tempRoot: string;
 
   beforeEach(() => {
-    tempRoot = mkdtempSync(join(tmpdir(), 'wt-test-'));
+    tempRoot = mkdtempSync(join(tmpdir(), 'rail-test-'));
   });
 
   afterEach(() => {

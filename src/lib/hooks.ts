@@ -51,9 +51,9 @@ export function mergeHookConfigs(...configs: HookConfig[]): HookConfig {
 }
 
 export function loadAllHooks(root: string): HookConfig {
-  const wtDir = join(root, '.wt');
-  const projectHooks = loadHooksFromFile(getConfigPath(root), wtDir);
-  const localHooks = loadHooksFromFile(getLocalConfigPath(root), wtDir);
+  const railDir = join(root, '.rail');
+  const projectHooks = loadHooksFromFile(getConfigPath(root), railDir);
+  const localHooks = loadHooksFromFile(getLocalConfigPath(root), railDir);
   const userHooks = loadHooksFromFile(getUserConfigPath(), dirname(getUserConfigPath()));
 
   return mergeHookConfigs(projectHooks, localHooks, userHooks);

@@ -11,17 +11,17 @@ export interface ScriptContext {
 
 export function buildEnv(context: ScriptContext): Record<string, string> {
   const env: Record<string, string> = {
-    WT_PROJECT: context.projectName,
-    WT_PROJECT_DIR: context.root,
+    RAIL_PROJECT: context.projectName,
+    RAIL_PROJECT_DIR: context.root,
   };
 
   if (context.feature) {
-    env.WT_FEATURE = context.feature;
-    env.WT_FEATURE_DIR = context.featureDir;
-    env.WT_PORT = String(context.basePort);
+    env.RAIL_FEATURE = context.feature;
+    env.RAIL_FEATURE_DIR = context.featureDir;
+    env.RAIL_PORT = String(context.basePort);
 
     for (let i = 0; i < context.ports.length; i++) {
-      env[`WT_PORT_${i + 1}`] = String(context.ports[i]);
+      env[`RAIL_PORT_${i + 1}`] = String(context.ports[i]);
     }
   }
 
@@ -33,10 +33,10 @@ export async function runScript(
   context: ScriptContext,
   cwd?: string,
 ): Promise<void> {
-  const base = join(context.root, '.wt');
+  const base = join(context.root, '.rail');
   const resolvedPath = resolve(base, scriptPath);
   if (!resolvedPath.startsWith(base + '/') && resolvedPath !== base) {
-    throw new Error(`Script path escapes .wt directory: ${scriptPath}`);
+    throw new Error(`Script path escapes .rail directory: ${scriptPath}`);
   }
   const env = { ...process.env, ...buildEnv(context) };
 

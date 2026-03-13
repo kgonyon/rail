@@ -1,12 +1,12 @@
 import { defineCommand } from 'citty';
 import consola from 'consola';
 import { basename } from 'path';
-import { getGitRoot, isWtProject } from '../lib/paths';
+import { getGitRoot, isRailProject } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { loadPortAllocations, getPortsForFeature } from '../lib/ports';
 import { listWorktrees, getWorktreeStats } from '../lib/git';
 import type { WorktreeInfo, WorktreeStats } from '../lib/git';
-import type { PortAllocations, WtConfig } from '../types/config';
+import type { PortAllocations, RailConfig } from '../types/config';
 
 export default defineCommand({
   meta: {
@@ -16,8 +16,8 @@ export default defineCommand({
   async run() {
     const root = await getGitRoot();
 
-    if (!isWtProject(root)) {
-      consola.warn('Not a wt project. Run `wt init` to initialize.');
+    if (!isRailProject(root)) {
+      consola.warn('Not a rail project. Run `rail init` to initialize.');
       return;
     }
 
@@ -62,7 +62,7 @@ export function formatStats(stats: WorktreeStats): string {
 async function printFeatureStatus(
   wt: WorktreeInfo,
   allocations: PortAllocations,
-  config: WtConfig,
+  config: RailConfig,
 ): Promise<void> {
   const feature = basename(wt.path);
   const allocation = allocations.features[feature];

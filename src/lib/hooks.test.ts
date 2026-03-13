@@ -18,7 +18,7 @@ describe('isHookEvent', () => {
 });
 
 describe('validateHookConfig', () => {
-  const configDir = '/project/.wt';
+  const configDir = '/project/.rail';
 
   it('returns empty array for non-array input', () => {
     expect(validateHookConfig(null, configDir)).toEqual([]);

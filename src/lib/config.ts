@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { parse } from 'yaml';
 import { getConfigPath, getLocalConfigPath } from './paths';
-import type { WtConfig } from '../types/config';
+import type { RailConfig } from '../types/config';
 
 /** @internal */
 export function isPlainObject(value: unknown): value is Record<string, any> {
@@ -26,16 +26,16 @@ export function deepMerge(
   return result;
 }
 
-export function loadConfig(root: string): WtConfig {
+export function loadConfig(root: string): RailConfig {
   const configPath = getConfigPath(root);
   const raw = readFileSync(configPath, 'utf-8');
-  let config = parse(raw) as WtConfig;
+  let config = parse(raw) as RailConfig;
 
   const localPath = getLocalConfigPath(root);
   if (existsSync(localPath)) {
     const localRaw = readFileSync(localPath, 'utf-8');
     const localConfig = parse(localRaw);
-    config = deepMerge(config, localConfig) as WtConfig;
+    config = deepMerge(config, localConfig) as RailConfig;
   }
 
   return config;

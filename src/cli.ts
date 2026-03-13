@@ -3,7 +3,7 @@ import consola from 'consola';
 
 const main = defineCommand({
   meta: {
-    name: 'wt',
+    name: 'rail',
     version: '1.0.0',
     description: 'Worktree development workflow manager',
   },

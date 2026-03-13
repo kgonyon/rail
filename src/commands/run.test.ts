@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'bun:test';
 import { findCommand, extractExtraArgs, shellEscape } from './run';
-import type { WtConfig } from '../types/config';
+import type { RailConfig } from '../types/config';
 
-function makeConfig(commands?: WtConfig['commands']): WtConfig {
-  const config: WtConfig = {
+function makeConfig(commands?: RailConfig['commands']): RailConfig {
+  const config: RailConfig = {
     name: 'test-project',
     worktrees: { dir: '.trees', branch_prefix: 'feature/' },
     port: { base: 3000, per_feature: 10, max: 100 },

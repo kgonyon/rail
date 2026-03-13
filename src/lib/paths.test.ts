@@ -26,33 +26,33 @@ describe('getWorktreePath', () => {
 });
 
 describe('getConfigPath', () => {
-  it('returns .wt/config.yaml under root', () => {
+  it('returns .rail/config.yaml under root', () => {
     expect(getConfigPath('/projects/app')).toBe(
-      join('/projects/app', '.wt', 'config.yaml'),
+      join('/projects/app', '.rail', 'config.yaml'),
     );
   });
 });
 
 describe('getLocalConfigPath', () => {
-  it('returns .wt/local.yaml under root', () => {
+  it('returns .rail/local.yaml under root', () => {
     expect(getLocalConfigPath('/projects/app')).toBe(
-      join('/projects/app', '.wt', 'local.yaml'),
+      join('/projects/app', '.rail', 'local.yaml'),
     );
   });
 });
 
 describe('getPortAllocationsPath', () => {
-  it('returns .wt/port_allocations.json under root', () => {
+  it('returns .rail/port_allocations.json under root', () => {
     expect(getPortAllocationsPath('/projects/app')).toBe(
-      join('/projects/app', '.wt', 'port_allocations.json'),
+      join('/projects/app', '.rail', 'port_allocations.json'),
     );
   });
 });
 
 describe('getUserConfigPath', () => {
-  it('returns ~/.config/wt/config.yaml', () => {
+  it('returns ~/.config/rail/config.yaml', () => {
     expect(getUserConfigPath()).toBe(
-      join(homedir(), '.config', 'wt', 'config.yaml'),
+      join(homedir(), '.config', 'rail', 'config.yaml'),
     );
   });
 });
@@ -75,19 +75,19 @@ describe('isRelativePath', () => {
 
 describe('resolveRelativePath', () => {
   it('resolves relative paths against baseDir', () => {
-    expect(resolveRelativePath('./scripts/run.sh', '/project/.wt')).toBe(
-      join('/project/.wt', './scripts/run.sh'),
+    expect(resolveRelativePath('./scripts/run.sh', '/project/.rail')).toBe(
+      join('/project/.rail', './scripts/run.sh'),
     );
   });
 
   it('resolves .sh files against baseDir', () => {
-    expect(resolveRelativePath('setup.sh', '/project/.wt')).toBe(
-      join('/project/.wt', 'setup.sh'),
+    expect(resolveRelativePath('setup.sh', '/project/.rail')).toBe(
+      join('/project/.rail', 'setup.sh'),
     );
   });
 
   it('returns bare commands unchanged', () => {
-    expect(resolveRelativePath('npm', '/project/.wt')).toBe('npm');
-    expect(resolveRelativePath('bun', '/project/.wt')).toBe('bun');
+    expect(resolveRelativePath('npm', '/project/.rail')).toBe('npm');
+    expect(resolveRelativePath('bun', '/project/.rail')).toBe('bun');
   });
 });

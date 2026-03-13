@@ -49,7 +49,7 @@ export default defineCommand({
     consola.info(`Allocated ports: ${ports.join(', ')}`);
 
     if (config.env_files?.length) {
-      generateEnvFiles(treePath, config.env_files, ports);
+      generateEnvFiles(treePath, config.env_files, ports, config.secrets);
       consola.info('Generated env files');
     }
 

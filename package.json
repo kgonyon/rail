@@ -2,6 +2,7 @@
   "name": "rail",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "bun run src/cli.ts",

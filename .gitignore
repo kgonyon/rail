@@ -3,3 +3,4 @@ dist/
 
 # rail local files
 .rail/
+trees/

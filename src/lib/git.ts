@@ -8,6 +8,16 @@ export interface WorktreeInfo {
   branch: string;
 }
 
+export interface OpenPrInfo {
+  number: number;
+  url: string;
+}
+
+export type OpenPrsResult =
+  | { state: 'unavailable' }
+  | { state: 'error' }
+  | { state: 'ok'; prs: OpenPrInfo[] };
+
 export interface WorktreeStats {
   fileCount: number;
   stagedFiles: number;
@@ -17,7 +27,7 @@ export interface WorktreeStats {
   deletions: number;
   isDirty: boolean;
   commitsAhead: number;
-  openPrCount: number | null;
+  openPrs: OpenPrsResult;
 }
 
 export async function addWorktree(
@@ -198,7 +208,7 @@ const CLEAN_STATS: WorktreeStats = {
   deletions: 0,
   isDirty: false,
   commitsAhead: 0,
-  openPrCount: 0,
+  openPrs: { state: 'ok', prs: [] },
 };
 
 const DEFAULT_BRANCH_FALLBACK = 'main';
@@ -226,45 +236,86 @@ export function __resetGhAvailableCache(): void {
   ghAvailableCache = null;
 }
 
+const MAX_OPEN_PRS = 50;
+
 /**
- * Parse JSON output from `gh pr list --json number`.
- * Expects an array; returns its length. Returns -1 on parse failure or
- * non-array result (e.g. an object, null, a number).
+ * Parse JSON output from `gh pr list --json number,url`.
+ * Returns an array of `OpenPrInfo` for valid entries; returns `null` on
+ * parse-level failure or non-array result. Malformed individual entries
+ * (missing fields, bad types, non-positive numbers, unsafe URLs) are dropped.
+ * Caps the result at `MAX_OPEN_PRS` valid entries; any beyond that are
+ * silently dropped to keep terminal output bounded.
  */
-export function parseGhPrListJson(output: string): number {
+export function parseGhPrListJson(output: string): OpenPrInfo[] | null {
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(output);
-    if (!Array.isArray(parsed)) return -1;
-    return parsed.length;
+    parsed = JSON.parse(output);
   } catch {
-    return -1;
+    return null;
   }
+  if (!Array.isArray(parsed)) return null;
+  const prs: OpenPrInfo[] = [];
+  for (const entry of parsed) {
+    const info = toOpenPrInfo(entry);
+    if (info !== null) prs.push(info);
+  }
+  return prs.slice(0, MAX_OPEN_PRS);
+}
+
+const URL_MAX_LENGTH = 2048;
+const URL_PREFIX = 'https://';
+
+/**
+ * Defense-in-depth: validate a PR URL parsed from `gh` JSON before letting it
+ * flow to terminal output. Rejects non-https schemes, control characters
+ * (ANSI escapes, CR/LF, BS, DEL), and oversized strings.
+ */
+function isSafePrUrl(url: string): boolean {
+  if (url.length === 0 || url.length > URL_MAX_LENGTH) return false;
+  if (!url.startsWith(URL_PREFIX)) return false;
+  for (let i = 0; i < url.length; i++) {
+    const code = url.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) return false;
+  }
+  return true;
+}
+
+function toOpenPrInfo(entry: unknown): OpenPrInfo | null {
+  if (typeof entry !== 'object' || entry === null) return null;
+  const record = entry as Record<string, unknown>;
+  const num = record.number;
+  const url = record.url;
+  if (typeof num !== 'number' || !Number.isInteger(num) || num <= 0) return null;
+  if (typeof url !== 'string' || !isSafePrUrl(url)) return null;
+  return { number: num, url };
 }
 
 const REFS_HEADS_PREFIX = 'refs/heads/';
-const OPEN_PR_COUNT_FAILURE = -1;
 
 /**
- * Count open PRs whose HEAD is `branch` via `gh pr list --json number`.
+ * List open PRs whose HEAD is `branch` via `gh pr list --json number,url`.
  * Strips a leading `refs/heads/` from `branch` before invoking gh.
- * Returns -1 on subprocess failure (rendered as `?` upstream).
+ * Returns `{ state: 'error' }` on subprocess failure, parse failure, or
+ * unsafe ref name; `{ state: 'ok', prs }` otherwise.
  */
-export async function getOpenPrCount(
+export async function getOpenPrs(
   treePath: string,
   branch: string,
-): Promise<number> {
+): Promise<OpenPrsResult> {
   const normalized = branch.startsWith(REFS_HEADS_PREFIX)
     ? branch.slice(REFS_HEADS_PREFIX.length)
     : branch;
-  if (!isSafeRefName(normalized)) return OPEN_PR_COUNT_FAILURE;
+  if (!isSafeRefName(normalized)) return { state: 'error' };
   try {
     const out = await ghExec(
       treePath,
-      `pr list --head ${normalized} --state open --json number`,
+      `pr list --head ${normalized} --state open --json number,url`,
     );
-    return parseGhPrListJson(out);
+    const prs = parseGhPrListJson(out);
+    if (prs === null) return { state: 'error' };
+    return { state: 'ok', prs };
   } catch {
-    return OPEN_PR_COUNT_FAILURE;
+    return { state: 'error' };
   }
 }
 
@@ -327,16 +378,19 @@ export async function getWorktreeStats(
   try {
     porcelainOutput = await gitExec(treePath, 'status --porcelain');
   } catch {
-    return { ...CLEAN_STATS, openPrCount: options.ghAvailable ? 0 : null };
+    const openPrs: OpenPrsResult = options.ghAvailable
+      ? { state: 'ok', prs: [] }
+      : { state: 'unavailable' };
+    return { ...CLEAN_STATS, openPrs };
   }
 
   const breakdown = parsePorcelainStatusBreakdown(porcelainOutput);
   const isDirty = breakdown.total > 0;
   const commitsAhead = await fetchCommitsAhead(treePath, options);
-  const openPrCount = await fetchOpenPrCount(treePath, options);
+  const openPrs = await fetchOpenPrs(treePath, options);
 
   if (!isDirty) {
-    return { ...CLEAN_STATS, commitsAhead, openPrCount };
+    return { ...CLEAN_STATS, commitsAhead, openPrs };
   }
 
   const { insertions, deletions } = await fetchNumstat(treePath);
@@ -349,16 +403,16 @@ export async function getWorktreeStats(
     deletions,
     isDirty,
     commitsAhead,
-    openPrCount,
+    openPrs,
   };
 }
 
-async function fetchOpenPrCount(
+async function fetchOpenPrs(
   treePath: string,
   options: WorktreeStatsOptions,
-): Promise<number | null> {
-  if (!options.ghAvailable) return null;
-  return getOpenPrCount(treePath, options.branch);
+): Promise<OpenPrsResult> {
+  if (!options.ghAvailable) return { state: 'unavailable' };
+  return getOpenPrs(treePath, options.branch);
 }
 
 async function fetchCommitsAhead(

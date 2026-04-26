@@ -115,17 +115,33 @@ export function formatStats(stats: WorktreeStats, defaultBranch: string): string
     lines.push(`? commits ahead of ${defaultBranch}`);
   }
 
-  if (stats.openPrCount !== null) {
-    if (stats.openPrCount > 0) {
-      const noun = stats.openPrCount === 1 ? 'PR' : 'PRs';
-      lines.push(`${stats.openPrCount} open ${noun}`);
-    } else if (stats.openPrCount === -1) {
-      lines.push('? open PRs');
-    }
-  }
+  appendPrLines(lines, stats.openPrs);
 
   if (lines.length === 0) return ['clean'];
   return lines;
+}
+
+function appendPrLines(lines: string[], openPrs: WorktreeStats['openPrs']): void {
+  switch (openPrs.state) {
+    case 'unavailable':
+      return;
+    case 'error':
+      lines.push('? open PRs');
+      return;
+    case 'ok': {
+      const { prs } = openPrs;
+      if (prs.length === 0) return;
+      if (prs.length === 1) {
+        lines.push(`1 open PR: ${prs[0]!.url}`);
+        return;
+      }
+      lines.push(`${prs.length} open PRs:`);
+      for (const pr of prs) {
+        lines.push(`  #${pr.number} ${pr.url}`);
+      }
+      return;
+    }
+  }
 }
 
 interface FeatureRender {

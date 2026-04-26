@@ -32,7 +32,7 @@ import {
   getWorktreeStats,
   isGhAvailable,
   isSafeRefName,
-  getOpenPrCount,
+  getOpenPrs,
   parseGhPrListJson,
   __resetGhAvailableCache,
 } from './git';
@@ -515,28 +515,144 @@ describe('isSafeRefName', () => {
 });
 
 describe('parseGhPrListJson', () => {
-  it('returns 0 for an empty array', () => {
-    expect(parseGhPrListJson('[]')).toBe(0);
+  it('returns an empty array for an empty JSON array', () => {
+    expect(parseGhPrListJson('[]')).toEqual([]);
   });
 
-  it('returns 1 for a single element', () => {
-    expect(parseGhPrListJson('[{"number":42}]')).toBe(1);
+  it('returns a single entry for a single valid element', () => {
+    expect(
+      parseGhPrListJson('[{"number":42,"url":"https://example/1"}]'),
+    ).toEqual([{ number: 42, url: 'https://example/1' }]);
   });
 
-  it('returns N for multiple elements', () => {
-    expect(parseGhPrListJson('[{"number":1},{"number":2},{"number":3}]')).toBe(3);
+  it('returns all entries for a multi-element happy path', () => {
+    const input =
+      '[{"number":1,"url":"https://e/1"},{"number":2,"url":"https://e/2"},{"number":3,"url":"https://e/3"}]';
+    expect(parseGhPrListJson(input)).toEqual([
+      { number: 1, url: 'https://e/1' },
+      { number: 2, url: 'https://e/2' },
+      { number: 3, url: 'https://e/3' },
+    ]);
   });
 
-  it('returns -1 for malformed JSON', () => {
-    expect(parseGhPrListJson('not json')).toBe(-1);
+  it('returns null for malformed JSON', () => {
+    expect(parseGhPrListJson('not json')).toBeNull();
   });
 
-  it('returns -1 for an object (non-array) result', () => {
-    expect(parseGhPrListJson('{"number":1}')).toBe(-1);
+  it('returns null for an object (non-array) result', () => {
+    expect(parseGhPrListJson('{"number":1}')).toBeNull();
   });
 
-  it('returns -1 for null', () => {
-    expect(parseGhPrListJson('null')).toBe(-1);
+  it('returns null for JSON null', () => {
+    expect(parseGhPrListJson('null')).toBeNull();
+  });
+
+  it('drops entries missing url, keeps the rest', () => {
+    const input =
+      '[{"number":1,"url":"https://e/1"},{"number":2},{"number":3,"url":"https://e/3"}]';
+    expect(parseGhPrListJson(input)).toEqual([
+      { number: 1, url: 'https://e/1' },
+      { number: 3, url: 'https://e/3' },
+    ]);
+  });
+
+  it('drops entries missing number, keeps the rest', () => {
+    const input =
+      '[{"url":"https://e/x"},{"number":2,"url":"https://e/2"}]';
+    expect(parseGhPrListJson(input)).toEqual([
+      { number: 2, url: 'https://e/2' },
+    ]);
+  });
+
+  it('drops entries with negative or zero number', () => {
+    const input =
+      '[{"number":-1,"url":"https://e/n"},{"number":0,"url":"https://e/z"},{"number":5,"url":"https://e/5"}]';
+    expect(parseGhPrListJson(input)).toEqual([
+      { number: 5, url: 'https://e/5' },
+    ]);
+  });
+
+  it('drops entries with empty-string url', () => {
+    const input =
+      '[{"number":1,"url":""},{"number":2,"url":"https://e/2"}]';
+    expect(parseGhPrListJson(input)).toEqual([
+      { number: 2, url: 'https://e/2' },
+    ]);
+  });
+
+  it('ignores extra fields on entries and keeps the typed shape', () => {
+    const input =
+      '[{"number":7,"url":"https://e/7","title":"hi","author":{"login":"x"}}]';
+    expect(parseGhPrListJson(input)).toEqual([
+      { number: 7, url: 'https://e/7' },
+    ]);
+  });
+
+  it('drops entries whose number is a string rather than a JSON number', () => {
+    const input =
+      '[{"number":"42","url":"https://e/s"},{"number":2,"url":"https://e/2"}]';
+    expect(parseGhPrListJson(input)).toEqual([
+      { number: 2, url: 'https://e/2' },
+    ]);
+  });
+
+  it('drops entries whose url uses http (not https)', () => {
+    const input =
+      '[{"number":1,"url":"http://example.com/pr/1"},{"number":2,"url":"https://e/2"}]';
+    expect(parseGhPrListJson(input)).toEqual([
+      { number: 2, url: 'https://e/2' },
+    ]);
+  });
+
+  it('drops entries whose url uses a non-https scheme like ftp', () => {
+    const input =
+      '[{"number":1,"url":"ftp://example.com/x"},{"number":2,"url":"https://e/2"}]';
+    expect(parseGhPrListJson(input)).toEqual([
+      { number: 2, url: 'https://e/2' },
+    ]);
+  });
+
+  it('drops entries whose url contains an ANSI escape character', () => {
+    const input = JSON.stringify([
+      { number: 1, url: 'https://example.com/[31mhi' },
+      { number: 2, url: 'https://e/2' },
+    ]);
+    expect(parseGhPrListJson(input)).toEqual([
+      { number: 2, url: 'https://e/2' },
+    ]);
+  });
+
+  it('drops entries whose url contains CR/LF', () => {
+    const input = JSON.stringify([
+      { number: 1, url: 'https://example.com/foo\r\nbar' },
+      { number: 2, url: 'https://e/2' },
+    ]);
+    expect(parseGhPrListJson(input)).toEqual([
+      { number: 2, url: 'https://e/2' },
+    ]);
+  });
+
+  it('drops entries whose url exceeds the 2048-char cap', () => {
+    const longUrl = `https://example.com/${'a'.repeat(2049)}`;
+    const input = JSON.stringify([
+      { number: 1, url: longUrl },
+      { number: 2, url: 'https://e/2' },
+    ]);
+    expect(parseGhPrListJson(input)).toEqual([
+      { number: 2, url: 'https://e/2' },
+    ]);
+  });
+
+  it('caps the returned array at 50 entries when given 51 valid entries', () => {
+    const entries = Array.from({ length: 51 }, (_, i) => ({
+      number: i + 1,
+      url: `https://e/${i + 1}`,
+    }));
+    const result = parseGhPrListJson(JSON.stringify(entries));
+    expect(result).not.toBeNull();
+    expect(result!.length).toBe(50);
+    expect(result![0]).toEqual({ number: 1, url: 'https://e/1' });
+    expect(result![49]).toEqual({ number: 50, url: 'https://e/50' });
   });
 });
 
@@ -566,43 +682,60 @@ describe('isGhAvailable', () => {
   });
 });
 
-describe('getOpenPrCount', () => {
-  it('returns the count from gh JSON output', async () => {
+describe('getOpenPrs', () => {
+  it('returns parsed prs from gh JSON output', async () => {
     ghExecHandler = () =>
-      Promise.resolve('[{"number":1},{"number":2}]');
-    expect(await getOpenPrCount('/fake/path', 'feature/x')).toBe(2);
+      Promise.resolve(
+        '[{"number":1,"url":"https://e/1"},{"number":2,"url":"https://e/2"}]',
+      );
+    expect(await getOpenPrs('/fake/path', 'feature/x')).toEqual({
+      state: 'ok',
+      prs: [
+        { number: 1, url: 'https://e/1' },
+        { number: 2, url: 'https://e/2' },
+      ],
+    });
   });
 
-  it('returns -1 on subprocess failure', async () => {
+  it('returns error state on subprocess failure', async () => {
     ghExecHandler = () => Promise.reject(new Error('gh failed'));
-    expect(await getOpenPrCount('/fake/path', 'feature/x')).toBe(-1);
+    expect(await getOpenPrs('/fake/path', 'feature/x')).toEqual({
+      state: 'error',
+    });
   });
 
-  it('strips refs/heads/ prefix before invoking gh', async () => {
+  it('returns error state on malformed JSON', async () => {
+    ghExecHandler = () => Promise.resolve('not json');
+    expect(await getOpenPrs('/fake/path', 'feature/x')).toEqual({
+      state: 'error',
+    });
+  });
+
+  it('strips refs/heads/ prefix and uses --json number,url', async () => {
     ghExecHandler = () => Promise.resolve('[]');
-    await getOpenPrCount('/fake/path', 'refs/heads/feature/x');
+    await getOpenPrs('/fake/path', 'refs/heads/feature/x');
     expect(ghExecCalls).toHaveLength(1);
     expect(ghExecCalls[0]?.args).toBe(
-      'pr list --head feature/x --state open --json number',
+      'pr list --head feature/x --state open --json number,url',
     );
     expect(ghExecCalls[0]?.cwd).toBe('/fake/path');
   });
 
   it('passes branch through unchanged when no refs/heads/ prefix', async () => {
     ghExecHandler = () => Promise.resolve('[]');
-    await getOpenPrCount('/fake/path', 'feature/x');
+    await getOpenPrs('/fake/path', 'feature/x');
     expect(ghExecCalls[0]?.args).toBe(
-      'pr list --head feature/x --state open --json number',
+      'pr list --head feature/x --state open --json number,url',
     );
   });
 
-  it('returns -1 without invoking ghExec for a malicious branch name', async () => {
+  it('returns error state without invoking ghExec for an unsafe ref name', async () => {
     ghExecHandler = () => Promise.resolve('[]');
-    const result = await getOpenPrCount(
+    const result = await getOpenPrs(
       '/fake/path',
       'feature/x;rm -rf /',
     );
-    expect(result).toBe(-1);
+    expect(result).toEqual({ state: 'error' });
     expect(ghExecCallCount).toBe(0);
     expect(ghExecCalls).toHaveLength(0);
   });
@@ -629,7 +762,7 @@ describe('getWorktreeStats', () => {
       deletions: 0,
       isDirty: false,
       commitsAhead: 0,
-      openPrCount: null,
+      openPrs: { state: 'unavailable' },
     });
   });
 
@@ -655,7 +788,7 @@ describe('getWorktreeStats', () => {
       deletions: 0,
       isDirty: true,
       commitsAhead: 0,
-      openPrCount: null,
+      openPrs: { state: 'unavailable' },
     });
   });
 
@@ -681,7 +814,7 @@ describe('getWorktreeStats', () => {
       deletions: 8,
       isDirty: true,
       commitsAhead: 4,
-      openPrCount: null,
+      openPrs: { state: 'unavailable' },
     });
   });
 
@@ -784,23 +917,26 @@ describe('getWorktreeStats', () => {
       if (args.includes('diff HEAD --numstat')) return Promise.resolve('');
       return Promise.resolve('');
     };
-    ghExecHandler = () => Promise.resolve('[{"number":1}]');
+    ghExecHandler = () =>
+      Promise.resolve('[{"number":1,"url":"https://e/1"}]');
 
     const stats = await getWorktreeStats('/fake/path', defaultOptions);
 
-    expect(stats.openPrCount).toBeNull();
+    expect(stats.openPrs).toEqual({ state: 'unavailable' });
     const prListCalls = ghExecCalls.filter((c) => c.args.includes('pr list'));
     expect(prListCalls).toHaveLength(0);
   });
 
-  it('populates openPrCount when ghAvailable is true', async () => {
+  it('populates openPrs when ghAvailable is true', async () => {
     gitExecHandler = (_root: string, args: string) => {
       if (args.includes('rev-list')) return Promise.resolve('0\n');
       if (args.includes('diff HEAD --numstat')) return Promise.resolve('');
       return Promise.resolve('');
     };
     ghExecHandler = () =>
-      Promise.resolve('[{"number":1},{"number":2}]');
+      Promise.resolve(
+        '[{"number":1,"url":"https://e/1"},{"number":2,"url":"https://e/2"}]',
+      );
 
     const stats = await getWorktreeStats('/fake/path', {
       defaultBranch: 'main',
@@ -808,10 +944,16 @@ describe('getWorktreeStats', () => {
       ghAvailable: true,
     });
 
-    expect(stats.openPrCount).toBe(2);
+    expect(stats.openPrs).toEqual({
+      state: 'ok',
+      prs: [
+        { number: 1, url: 'https://e/1' },
+        { number: 2, url: 'https://e/2' },
+      ],
+    });
   });
 
-  it('returns -1 openPrCount when ghAvailable is true but gh subprocess fails', async () => {
+  it('returns error openPrs when ghAvailable is true but gh subprocess fails', async () => {
     gitExecHandler = (_root: string, args: string) => {
       if (args.includes('rev-list')) return Promise.resolve('0\n');
       if (args.includes('diff HEAD --numstat')) return Promise.resolve('');
@@ -825,6 +967,6 @@ describe('getWorktreeStats', () => {
       ghAvailable: true,
     });
 
-    expect(stats.openPrCount).toBe(-1);
+    expect(stats.openPrs).toEqual({ state: 'error' });
   });
 });

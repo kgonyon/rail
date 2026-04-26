@@ -37,7 +37,7 @@ describe('formatStats', () => {
       deletions: 0,
       isDirty: false,
       commitsAhead: 0,
-      openPrCount: 0,
+      openPrs: { state: 'unavailable' },
       ...overrides,
     };
   }
@@ -117,28 +117,66 @@ describe('formatStats', () => {
     expect(formatStats(stats, 'main')).toEqual(['clean']);
   });
 
-  it('formats only PR singular as "1 open PR"', () => {
-    const stats = makeStats({ openPrCount: 1 });
-    expect(formatStats(stats, 'main')).toEqual(['1 open PR']);
+  it('formats one open PR with the URL inlined on the same line', () => {
+    const stats = makeStats({
+      openPrs: {
+        state: 'ok',
+        prs: [{ number: 123, url: 'https://example.com/owner/repo/pull/123' }],
+      },
+    });
+    expect(formatStats(stats, 'main')).toEqual([
+      '1 open PR: https://example.com/owner/repo/pull/123',
+    ]);
   });
 
-  it('formats only PR plural as "N open PRs"', () => {
-    const stats = makeStats({ openPrCount: 2 });
-    expect(formatStats(stats, 'main')).toEqual(['2 open PRs']);
+  it('formats two open PRs as a count line plus indented entries', () => {
+    const stats = makeStats({
+      openPrs: {
+        state: 'ok',
+        prs: [
+          { number: 123, url: 'https://example.com/owner/repo/pull/123' },
+          { number: 456, url: 'https://example.com/owner/repo/pull/456' },
+        ],
+      },
+    });
+    expect(formatStats(stats, 'main')).toEqual([
+      '2 open PRs:',
+      '  #123 https://example.com/owner/repo/pull/123',
+      '  #456 https://example.com/owner/repo/pull/456',
+    ]);
   });
 
-  it('renders ? when openPrCount is -1 sentinel', () => {
-    const stats = makeStats({ openPrCount: -1 });
+  it('formats three open PRs with count line plus three indented entries', () => {
+    const stats = makeStats({
+      openPrs: {
+        state: 'ok',
+        prs: [
+          { number: 1, url: 'https://e/1' },
+          { number: 2, url: 'https://e/2' },
+          { number: 3, url: 'https://e/3' },
+        ],
+      },
+    });
+    expect(formatStats(stats, 'main')).toEqual([
+      '3 open PRs:',
+      '  #1 https://e/1',
+      '  #2 https://e/2',
+      '  #3 https://e/3',
+    ]);
+  });
+
+  it('renders ? open PRs when openPrs state is error', () => {
+    const stats = makeStats({ openPrs: { state: 'error' } });
     expect(formatStats(stats, 'main')).toEqual(['? open PRs']);
   });
 
-  it('omits PR line when openPrCount is null (gh unavailable)', () => {
-    const stats = makeStats({ openPrCount: null });
+  it('omits PR lines when openPrs state is unavailable', () => {
+    const stats = makeStats({ openPrs: { state: 'unavailable' } });
     expect(formatStats(stats, 'main')).toEqual(['clean']);
   });
 
-  it('omits PR line when openPrCount is 0', () => {
-    const stats = makeStats({ openPrCount: 0 });
+  it('omits PR lines when openPrs state is ok with zero entries', () => {
+    const stats = makeStats({ openPrs: { state: 'ok', prs: [] } });
     expect(formatStats(stats, 'main')).toEqual(['clean']);
   });
 
@@ -152,13 +190,16 @@ describe('formatStats', () => {
       deletions: 7,
       isDirty: true,
       commitsAhead: 4,
-      openPrCount: 1,
+      openPrs: {
+        state: 'ok',
+        prs: [{ number: 7, url: 'https://example.com/owner/repo/pull/7' }],
+      },
     });
     expect(formatStats(stats, 'main')).toEqual([
       '3 files changed (2 staged, 1 unstaged)  +42 -7',
       '2 untracked files',
       '4 commits ahead of main',
-      '1 open PR',
+      '1 open PR: https://example.com/owner/repo/pull/7',
     ]);
   });
 

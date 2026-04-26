@@ -34,7 +34,7 @@ Surface four distinct kinds of in-flight state per worktree in `rail status`: (1
 - **FR-3:** When a worktree has untracked files, status shows an "untracked files" line with a count.
 - **FR-4:** When a worktree has commits not present on `origin/<default-branch>`, status shows a "commits ahead of <default>" line with a count.
 - **FR-5:** When the worktree's branch IS the default branch, the "commits ahead" line is omitted entirely (the count would always be zero and is noise).
-- **FR-6:** When `gh` is available and authenticated and one or more open PRs have this branch as HEAD, status shows an "open PR" line with a count.
+- **FR-6:** When `gh` is available and authenticated and one or more open PRs have this branch as HEAD, status shows an "open PR" line with a count AND a clickable URL for each PR. With one PR, the URL is inlined on the same line as the count. With two or more, the count line lists the total and each PR appears on its own indented line below it as `#<number> <url>`.
 - **FR-7:** When all four categories are zero, status shows `clean` (matching today's behavior).
 - **FR-8:** Lines only appear when their count is non-zero (or `?` per ERR-1/ERR-2).
 - **FR-9:** Stat collection across worktrees is parallel (`Promise.all`).
@@ -55,6 +55,7 @@ Surface four distinct kinds of in-flight state per worktree in `rail status`: (1
 - **US-4:** As a developer with a worktree on `main` itself, I don't want a noisy "0 commits ahead of main" line. → AC: UI-5
 - **US-5:** As a developer without `gh` installed/authed, I want `rail status` to still work and tell me once that PR counts are unavailable. → AC: ERR-2
 - **US-6:** As a developer in a clean worktree, I want `rail status` to keep saying `clean` so I can tell at a glance there's nothing to do. → AC: UI-6
+- **US-7:** As a developer reviewing `rail status`, I want a clickable URL for each open PR so I can jump straight to it without copying a number into the browser. → AC: UI-7, UI-8
 
 ## Contracts
 
@@ -75,9 +76,21 @@ interface WorktreeStats {
   deletions: number;        // existing
   isDirty: boolean;         // existing — fileCount > 0
   commitsAhead: number;     // new — vs origin/<default-branch>; 0 if branch == default
-  openPrCount: number | null; // new — null when gh unavailable/unauthed; -1 sentinel for per-call failure (rendered as '?')
+  openPrs: OpenPrsResult;   // new — discriminated union; carries number + url per PR
 }
+
+interface OpenPrInfo {
+  number: number;
+  url: string;
+}
+
+type OpenPrsResult =
+  | { state: 'unavailable' }       // gh missing or unauthenticated
+  | { state: 'error' }              // gh subprocess failed for this branch
+  | { state: 'ok'; prs: OpenPrInfo[] };
 ```
+
+`gh pr list` is invoked with `--json number,url` so each PR carries enough info to render a clickable line.
 
 `isDirty` continues to mean "any tracked or untracked file change present" — `refresh.ts` callers keep working unchanged.
 
@@ -127,7 +140,15 @@ N/A — internal-only CLI tool, no telemetry surface. (Per Non-Functional Requir
       3 files changed (2 staged, 1 unstaged)  +42 -7
       2 untracked files
       4 commits ahead of main
-      1 open PR
+      1 open PR: https://github.com/owner/repo/pull/123
+
+  multi-pr-feature
+    Branch: feature/multi-pr
+    Ports:  3030-3031
+    Status:
+      2 open PRs:
+        #123 https://github.com/owner/repo/pull/123
+        #124 https://github.com/owner/repo/pull/124
 
   bugfix-y
     Branch: feature/bugfix-y
@@ -173,7 +194,9 @@ N/A — internal-only CLI tool, no telemetry surface. (Per Non-Functional Requir
 - [ ] **UI-1:** With both staged and unstaged tracked changes present, status renders `N files changed (S staged, U unstaged)  +X -Y`. (proves US-2)
 - [ ] **UI-2:** With untracked files present, status renders `N untracked files` on its own line. (proves US-3)
 - [ ] **UI-3:** With commits not on `origin/<default>` and no uncommitted work, status renders `N commits ahead of <default>` and does NOT render `clean`. (proves US-1)
-- [ ] **UI-4:** With one open PR sourced from the branch, status renders `1 open PR`. With ≥2, renders `N open PRs`. (proves US-1)
+- [ ] **UI-4:** With one open PR sourced from the branch, status renders `1 open PR: <url>` (count and URL on the same line). With ≥2, renders `N open PRs:` followed by one indented `#<number> <url>` line per PR. (proves US-1, US-7)
+- [ ] **UI-7:** Single-PR rendering inlines the URL after the colon on the same line as the count. (proves US-7)
+- [ ] **UI-8:** Multi-PR rendering shows the count line plus one `#<number> <url>` line per PR, indented under the count. (proves US-7)
 - [ ] **UI-5:** When the worktree's branch equals the resolved default branch, the `commits ahead` line is omitted regardless of count. (proves US-4)
 - [ ] **UI-6:** When all categories are zero, status renders the single token `clean` (matches today's behavior). (proves US-6)
 
@@ -305,3 +328,48 @@ UI-1, UI-2, UI-3, UI-4, UI-5, UI-6, ERR-1, ERR-2, ERR-3. Run: `bun test`.
 - Order of lines is fixed: changes → untracked → ahead → PR.
 - Pluralization uses simple `=== 1` check — no i18n.
 - The `?` rendering keeps the same line shape minus the count, so users can still see what the tool was attempting.
+
+---
+
+### Phase 4: PR URLs in status
+
+**Status:** completed
+**Dependencies:** Phase 3
+
+#### Summary
+
+Replace the count-only `openPrCount: number | null` (with `-1` failure sentinel) with a discriminated `openPrs: OpenPrsResult` union that carries per-PR number and URL. Update `gh pr list` invocation to fetch `number,url`. Render single-PR inline with URL, multi-PR as count line + indented `#<number> <url>` lines.
+
+#### Tasks
+
+- [ ] In `src/lib/git.ts`, define `OpenPrInfo` and `OpenPrsResult` types. Replace `openPrCount` field on `WorktreeStats` with `openPrs: OpenPrsResult`. Update `CLEAN_STATS.openPrs` to `{ state: 'ok', prs: [] }`.
+- [ ] Rewrite `parseGhPrListJson(output)` to return `OpenPrInfo[] | null` (null on parse / shape failure). Validate each entry has a positive integer `number` and a string `url`; drop entries that don't.
+- [ ] Rewrite `getOpenPrCount` → `getOpenPrs(treePath, branch): Promise<OpenPrsResult>` returning `{ state: 'error' }` on failure or unsafe ref name, otherwise `{ state: 'ok', prs }`. Invoke `gh pr list --head <branch> --state open --json number,url`.
+- [ ] In `getWorktreeStats`, set `openPrs: { state: 'unavailable' }` when `ghAvailable === false`; otherwise call `getOpenPrs`.
+- [ ] In `src/commands/status.ts`, update `formatStats` to switch on `stats.openPrs.state`:
+  - `unavailable` → omit PR lines.
+  - `error` → push `'? open PRs'`.
+  - `ok` with `prs.length === 0` → omit.
+  - `ok` with `prs.length === 1` → push `` `1 open PR: ${prs[0].url}` ``.
+  - `ok` with `prs.length >= 2` → push `` `${prs.length} open PRs:` ``, then for each PR push `` `  #${pr.number} ${pr.url}` `` (two-space leading indent inside the line so the existing 6-space outer indent yields 8-space depth).
+- [ ] Update `src/lib/git.test.ts`: tests for new `parseGhPrListJson` return shape (valid arrays, malformed entries dropped, parse failure → null), `getOpenPrs` (state ok/error, ref-name validation still rejects), `getWorktreeStats` populates `openPrs` correctly for unavailable/ok/error.
+- [ ] Update `src/commands/status.test.ts`: cases for single PR (URL inlined), two PRs (count + indented lines), zero PRs (omitted), unavailable (omitted), error (`? open PRs`). Update `baseStats` shape.
+
+#### Testing
+
+UI-4, UI-7, UI-8, ERR-1, ERR-2. Run: `bun test` and `bunx tsc --noEmit`.
+
+#### Files Changed
+
+| File | Changes |
+|------|---------|
+| `src/lib/git.ts` | New `OpenPrInfo` / `OpenPrsResult` types; `parseGhPrListJson` returns array; `getOpenPrs`; `WorktreeStats.openPrs`. |
+| `src/commands/status.ts` | `formatStats` switch on `OpenPrsResult.state`; emit URL line(s). |
+| `src/lib/git.test.ts` | Updated parser, getOpenPrs, getWorktreeStats tests. |
+| `src/commands/status.test.ts` | Updated formatter tests for inline / multi-line URL rendering. |
+
+#### Notes
+
+- The `#<number>` prefix is for visual scanning; the URL itself already encodes the number.
+- Sub-line indent depth: outer `Status:` block already adds 6 spaces; inner `  #N <url>` adds 2 more for 8 total. This matches the spec mockup.
+- Pluralization rules unchanged: `=== 1` → `'PR'`, otherwise `'PRs'`.

@@ -42,7 +42,7 @@ Surface four distinct kinds of in-flight state per worktree in `rail status`: (1
 - **FR-11:** When `rail status` writes to a TTY, each rendered PR URL is wrapped in an OSC 8 hyperlink escape so terminal emulators that support the standard render it as a clickable link. When stdout is not a TTY (piped, redirected, or non-interactive), the URL is emitted as plain text with no escape sequences.
 - **FR-12:** TTY detection uses `tty.isatty(1)` as the primary signal (Bun's `process.stdout.isTTY` is unreliable — returns `undefined` on real TTYs in some build modes), with `process.stdout.isTTY === true` as a fallback.
 - **FR-13:** A `RAIL_HYPERLINKS` env var overrides detection: `always` forces emission, `never` forces plain text. Any other value falls through to detection.
-- **FR-14:** When running inside tmux (`TMUX` env var set), each OSC 8 escape is wrapped in tmux's DCS passthrough envelope (`\ePtmux;<inner with each ESC doubled>\e\\`) so tmux forwards the raw escape to the outer terminal instead of swallowing it. Requires `set -g allow-passthrough on` in tmux config (default on tmux 3.3+).
+- **FR-14:** Inside tmux, the OSC 8 escape is emitted unchanged (no DCS passthrough wrapping). Modern tmux (3.4+) with `allow-passthrough on` natively forwards OSC 8 hyperlinks to the outer terminal. Older tmux strips OSC 8; the workaround there is to upgrade tmux or set `RAIL_HYPERLINKS=never`.
 
 ### Non-Functional Requirements
 - **Performance:** `rail status` should stay snappy for typical 5–20 worktrees. With parallelization, total wall time ≈ slowest single worktree's stat fetch (~few hundred ms with `gh` involved).

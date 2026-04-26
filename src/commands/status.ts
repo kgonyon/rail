@@ -43,10 +43,9 @@ export default defineCommand({
     consola.info(`Active features (${features.length}):\n`);
 
     const hyperlinks = shouldEmitHyperlinks();
-    const tmux = hyperlinks && isInsideTmux();
     const renders = await collectStats(features, { defaultBranch, ghAvailable });
     for (const render of renders) {
-      printFeatureStatus(render, { allocations, config, defaultBranch, hyperlinks, tmux });
+      printFeatureStatus(render, { allocations, config, defaultBranch, hyperlinks });
     }
   },
 });
@@ -105,30 +104,17 @@ async function collectStats(
 }
 
 /**
- * True when the process is running inside a tmux session.
- * @internal
- */
-export function isInsideTmux(env = process.env): boolean {
-  return Boolean(env.TMUX);
-}
-
-/**
  * Wrap a URL in OSC 8 hyperlink escapes when `hyperlinks` is true.
  * Visible text is the URL itself so users see what they're clicking.
  *
- * When `tmux` is true, the OSC 8 sequence is wrapped in tmux's DCS
- * passthrough envelope (`\ePtmux;…\e\\`) with every inner ESC doubled,
- * so tmux forwards the raw escape to the outer terminal instead of
- * eating it. This requires `set -g allow-passthrough on` in tmux config
- * (default on tmux 3.3+).
+ * Modern tmux (3.4+) forwards OSC 8 natively when `allow-passthrough on`,
+ * so no DCS wrapping is needed. Older tmux strips OSC 8 entirely; the
+ * fix there is to upgrade tmux or set `RAIL_HYPERLINKS=never`.
  * @internal
  */
-export function linkify(url: string, hyperlinks: boolean, tmux = false): string {
+export function linkify(url: string, hyperlinks: boolean): string {
   if (!hyperlinks) return url;
-  const osc8 = `\x1b]8;;${url}\x1b\\${url}\x1b]8;;\x1b\\`;
-  if (!tmux) return osc8;
-  const escaped = osc8.replace(/\x1b/g, '\x1b\x1b');
-  return `\x1bPtmux;${escaped}\x1b\\`;
+  return `\x1b]8;;${url}\x1b\\${url}\x1b]8;;\x1b\\`;
 }
 
 /**
@@ -140,7 +126,7 @@ export function linkify(url: string, hyperlinks: boolean, tmux = false): string 
 export function formatStats(
   stats: WorktreeStats,
   defaultBranch: string,
-  options: { hyperlinks: boolean; tmux?: boolean },
+  options: { hyperlinks: boolean },
 ): string[] {
   const lines: string[] = [];
   const changedTotal = stats.stagedFiles + stats.unstagedFiles;
@@ -166,7 +152,7 @@ export function formatStats(
     lines.push(`? commits ahead of ${defaultBranch}`);
   }
 
-  appendPrLines(lines, stats.openPrs, options.hyperlinks, options.tmux === true);
+  appendPrLines(lines, stats.openPrs, options.hyperlinks);
 
   if (lines.length === 0) return ['clean'];
   return lines;
@@ -176,7 +162,6 @@ function appendPrLines(
   lines: string[],
   openPrs: WorktreeStats['openPrs'],
   hyperlinks: boolean,
-  tmux: boolean,
 ): void {
   switch (openPrs.state) {
     case 'unavailable':
@@ -188,12 +173,12 @@ function appendPrLines(
       const { prs } = openPrs;
       if (prs.length === 0) return;
       if (prs.length === 1) {
-        lines.push(`1 open PR: ${linkify(prs[0]!.url, hyperlinks, tmux)}`);
+        lines.push(`1 open PR: ${linkify(prs[0]!.url, hyperlinks)}`);
         return;
       }
       lines.push(`${prs.length} open PRs:`);
       for (const pr of prs) {
-        lines.push(`  #${pr.number} ${linkify(pr.url, hyperlinks, tmux)}`);
+        lines.push(`  #${pr.number} ${linkify(pr.url, hyperlinks)}`);
       }
       return;
     }
@@ -210,12 +195,11 @@ interface PrintFeatureOptions {
   config: RailConfig;
   defaultBranch: string;
   hyperlinks: boolean;
-  tmux: boolean;
 }
 
 function printFeatureStatus(render: FeatureRender, options: PrintFeatureOptions): void {
   const { wt, stats } = render;
-  const { allocations, config, defaultBranch, hyperlinks, tmux } = options;
+  const { allocations, config, defaultBranch, hyperlinks } = options;
   const feature = basename(wt.path);
   const allocation = allocations.features[feature];
   const ports = allocation
@@ -223,7 +207,7 @@ function printFeatureStatus(render: FeatureRender, options: PrintFeatureOptions)
     : [];
   const branchName = wt.branch.replace('refs/heads/', '');
   const portStr = ports.length > 0 ? ports.join(', ') : 'unallocated';
-  const lines = formatStats(stats, defaultBranch, { hyperlinks, tmux });
+  const lines = formatStats(stats, defaultBranch, { hyperlinks });
 
   console.log(`  ${feature}`);
   console.log(`    Branch: ${branchName}`);

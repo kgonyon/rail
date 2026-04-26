@@ -2,7 +2,6 @@ import { describe, it, expect } from 'bun:test';
 import {
   filterFeatureWorktrees,
   formatStats,
-  isInsideTmux,
   linkify,
   shouldEmitHyperlinks,
 } from './status';
@@ -277,30 +276,6 @@ describe('linkify', () => {
     );
   });
 
-  it('wraps OSC 8 in tmux DCS passthrough when tmux is true', () => {
-    const url = 'https://example.com/x';
-    const inner = `\x1b]8;;${url}\x1b\\${url}\x1b]8;;\x1b\\`;
-    const escaped = inner.replace(/\x1b/g, '\x1b\x1b');
-    expect(linkify(url, true, true)).toBe(`\x1bPtmux;${escaped}\x1b\\`);
-  });
-
-  it('emits plain text when hyperlinks is false even with tmux true', () => {
-    expect(linkify('https://example.com/x', false, true)).toBe('https://example.com/x');
-  });
-});
-
-describe('isInsideTmux', () => {
-  it('returns true when TMUX env var is set', () => {
-    expect(isInsideTmux({ TMUX: '/tmp/tmux-501/default,1234,0' })).toBe(true);
-  });
-
-  it('returns false when TMUX is unset', () => {
-    expect(isInsideTmux({})).toBe(false);
-  });
-
-  it('returns false when TMUX is empty string', () => {
-    expect(isInsideTmux({ TMUX: '' })).toBe(false);
-  });
 });
 
 describe('shouldEmitHyperlinks', () => {

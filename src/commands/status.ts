@@ -41,9 +41,10 @@ export default defineCommand({
 
     consola.info(`Active features (${features.length}):\n`);
 
+    const hyperlinks = process.stdout.isTTY === true;
     const renders = await collectStats(features, { defaultBranch, ghAvailable });
     for (const render of renders) {
-      printFeatureStatus(render, allocations, config, defaultBranch);
+      printFeatureStatus(render, { allocations, config, defaultBranch, hyperlinks });
     }
   },
 });
@@ -85,12 +86,26 @@ async function collectStats(
 }
 
 /**
+ * Wrap a URL in OSC 8 hyperlink escapes when `hyperlinks` is true.
+ * Visible text is the URL itself so users see what they're clicking.
+ * @internal
+ */
+export function linkify(url: string, hyperlinks: boolean): string {
+  if (!hyperlinks) return url;
+  return `\x1b]8;;${url}\x1b\\${url}\x1b]8;;\x1b\\`;
+}
+
+/**
  * Format worktree stats for display.
  * Returns one line per non-zero category, in fixed order:
  * changes -> untracked -> ahead -> PR. Returns `['clean']` when truly clean.
  * @internal
  */
-export function formatStats(stats: WorktreeStats, defaultBranch: string): string[] {
+export function formatStats(
+  stats: WorktreeStats,
+  defaultBranch: string,
+  options: { hyperlinks: boolean },
+): string[] {
   const lines: string[] = [];
   const changedTotal = stats.stagedFiles + stats.unstagedFiles;
 
@@ -115,13 +130,17 @@ export function formatStats(stats: WorktreeStats, defaultBranch: string): string
     lines.push(`? commits ahead of ${defaultBranch}`);
   }
 
-  appendPrLines(lines, stats.openPrs);
+  appendPrLines(lines, stats.openPrs, options.hyperlinks);
 
   if (lines.length === 0) return ['clean'];
   return lines;
 }
 
-function appendPrLines(lines: string[], openPrs: WorktreeStats['openPrs']): void {
+function appendPrLines(
+  lines: string[],
+  openPrs: WorktreeStats['openPrs'],
+  hyperlinks: boolean,
+): void {
   switch (openPrs.state) {
     case 'unavailable':
       return;
@@ -132,12 +151,12 @@ function appendPrLines(lines: string[], openPrs: WorktreeStats['openPrs']): void
       const { prs } = openPrs;
       if (prs.length === 0) return;
       if (prs.length === 1) {
-        lines.push(`1 open PR: ${prs[0]!.url}`);
+        lines.push(`1 open PR: ${linkify(prs[0]!.url, hyperlinks)}`);
         return;
       }
       lines.push(`${prs.length} open PRs:`);
       for (const pr of prs) {
-        lines.push(`  #${pr.number} ${pr.url}`);
+        lines.push(`  #${pr.number} ${linkify(pr.url, hyperlinks)}`);
       }
       return;
     }
@@ -149,13 +168,16 @@ interface FeatureRender {
   stats: WorktreeStats;
 }
 
-function printFeatureStatus(
-  render: FeatureRender,
-  allocations: PortAllocations,
-  config: RailConfig,
-  defaultBranch: string,
-): void {
+interface PrintFeatureOptions {
+  allocations: PortAllocations;
+  config: RailConfig;
+  defaultBranch: string;
+  hyperlinks: boolean;
+}
+
+function printFeatureStatus(render: FeatureRender, options: PrintFeatureOptions): void {
   const { wt, stats } = render;
+  const { allocations, config, defaultBranch, hyperlinks } = options;
   const feature = basename(wt.path);
   const allocation = allocations.features[feature];
   const ports = allocation
@@ -163,7 +185,7 @@ function printFeatureStatus(
     : [];
   const branchName = wt.branch.replace('refs/heads/', '');
   const portStr = ports.length > 0 ? ports.join(', ') : 'unallocated';
-  const lines = formatStats(stats, defaultBranch);
+  const lines = formatStats(stats, defaultBranch, { hyperlinks });
 
   console.log(`  ${feature}`);
   console.log(`    Branch: ${branchName}`);

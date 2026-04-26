@@ -39,6 +39,7 @@ Surface four distinct kinds of in-flight state per worktree in `rail status`: (1
 - **FR-8:** Lines only appear when their count is non-zero (or `?` per ERR-1/ERR-2).
 - **FR-9:** Stat collection across worktrees is parallel (`Promise.all`).
 - **FR-10:** Default branch is detected via `git symbolic-ref refs/remotes/origin/HEAD`, falling back to `main`.
+- **FR-11:** When `rail status` writes to a TTY, each rendered PR URL is wrapped in an OSC 8 hyperlink escape so terminal emulators that support the standard render it as a clickable link. When stdout is not a TTY (piped, redirected, or non-interactive), the URL is emitted as plain text with no escape sequences.
 
 ### Non-Functional Requirements
 - **Performance:** `rail status` should stay snappy for typical 5–20 worktrees. With parallelization, total wall time ≈ slowest single worktree's stat fetch (~few hundred ms with `gh` involved).
@@ -56,6 +57,7 @@ Surface four distinct kinds of in-flight state per worktree in `rail status`: (1
 - **US-5:** As a developer without `gh` installed/authed, I want `rail status` to still work and tell me once that PR counts are unavailable. → AC: ERR-2
 - **US-6:** As a developer in a clean worktree, I want `rail status` to keep saying `clean` so I can tell at a glance there's nothing to do. → AC: UI-6
 - **US-7:** As a developer reviewing `rail status`, I want a clickable URL for each open PR so I can jump straight to it without copying a number into the browser. → AC: UI-7, UI-8
+- **US-8:** As a developer in a modern terminal, I want PR URLs to render as actual clickable hyperlinks (not just selectable text) so a single click opens the PR. → AC: UI-9, UI-10
 
 ## Contracts
 
@@ -197,6 +199,8 @@ N/A — internal-only CLI tool, no telemetry surface. (Per Non-Functional Requir
 - [ ] **UI-4:** With one open PR sourced from the branch, status renders `1 open PR: <url>` (count and URL on the same line). With ≥2, renders `N open PRs:` followed by one indented `#<number> <url>` line per PR. (proves US-1, US-7)
 - [ ] **UI-7:** Single-PR rendering inlines the URL after the colon on the same line as the count. (proves US-7)
 - [ ] **UI-8:** Multi-PR rendering shows the count line plus one `#<number> <url>` line per PR, indented under the count. (proves US-7)
+- [ ] **UI-9:** When stdout is a TTY, each PR URL is wrapped in `\x1b]8;;<url>\x1b\\<url>\x1b]8;;\x1b\\` (OSC 8) so terminals like iTerm2, kitty, WezTerm, and modern xterm render it as a clickable link. (proves US-8)
+- [ ] **UI-10:** When stdout is NOT a TTY (e.g., piped to a file), the URL is emitted verbatim with no escape sequences, so logs and pipelines stay clean. (proves US-8)
 - [ ] **UI-5:** When the worktree's branch equals the resolved default branch, the `commits ahead` line is omitted regardless of count. (proves US-4)
 - [ ] **UI-6:** When all categories are zero, status renders the single token `clean` (matches today's behavior). (proves US-6)
 
@@ -373,3 +377,53 @@ UI-4, UI-7, UI-8, ERR-1, ERR-2. Run: `bun test` and `bunx tsc --noEmit`.
 - The `#<number>` prefix is for visual scanning; the URL itself already encodes the number.
 - Sub-line indent depth: outer `Status:` block already adds 6 spaces; inner `  #N <url>` adds 2 more for 8 total. This matches the spec mockup.
 - Pluralization rules unchanged: `=== 1` → `'PR'`, otherwise `'PRs'`.
+
+---
+
+### Phase 5: Clickable terminal hyperlinks
+
+**Status:** completed
+**Dependencies:** Phase 4
+
+#### Summary
+
+Wrap each rendered PR URL with the OSC 8 hyperlink escape so TTY-supporting terminals turn it into a true clickable link. Gate emission on `process.stdout.isTTY` so non-interactive output (pipes, redirects, CI logs) stays plain. The visible text stays the URL itself, so terminals without OSC 8 support are unaffected (the surrounding escape bytes get rendered as a small amount of garbage at worst on truly ancient terminals — but isTTY gating + the universality of OSC 8 in modern emulators makes this acceptable).
+
+#### Tasks
+
+- [ ] In `src/commands/status.ts`, add a small pure helper:
+  ```typescript
+  export function linkify(url: string, hyperlinks: boolean): string {
+    if (!hyperlinks) return url;
+    return `\x1b]8;;${url}\x1b\\${url}\x1b]8;;\x1b\\`;
+  }
+  ```
+  The visible-text segment intentionally repeats the URL so users see what they're clicking and can copy it.
+- [ ] Update `formatStats` signature to accept an options object:
+  `formatStats(stats: WorktreeStats, defaultBranch: string, options: { hyperlinks: boolean }): string[]`.
+  Plumb the flag through `appendPrLines` so both the single-PR inline URL and the multi-PR `#<number> <url>` lines use `linkify`.
+- [ ] In `run()` of `src/commands/status.ts`, compute `const hyperlinks = process.stdout.isTTY === true;` once and pass it to `printFeatureStatus`. `printFeatureStatus` forwards it to `formatStats`.
+- [ ] Tests in `src/commands/status.test.ts`:
+  - `linkify(url, false)` → returns the URL unchanged.
+  - `linkify(url, true)` → returns the OSC 8 wrapped form: `'\x1b]8;;' + url + '\x1b\\' + url + '\x1b]8;;\x1b\\'`.
+  - `formatStats` with `hyperlinks: false` for single PR: line is `'1 open PR: <url>'` (plain).
+  - `formatStats` with `hyperlinks: true` for single PR: line is `'1 open PR: ' + linkify(url, true)`.
+  - `formatStats` with `hyperlinks: true` for multi-PR: each `#N <url>` line has the URL portion wrapped.
+  - All existing non-PR tests get `hyperlinks: false` in their options object (default).
+
+#### Testing
+
+UI-9, UI-10. Run: `bun test` and `bunx tsc --noEmit`.
+
+#### Files Changed
+
+| File | Changes |
+|------|---------|
+| `src/commands/status.ts` | Add `linkify`; thread `hyperlinks` through formatStats / appendPrLines / printFeatureStatus / run. |
+| `src/commands/status.test.ts` | Tests for `linkify` and hyperlinks-on / hyperlinks-off rendering. |
+
+#### Notes
+
+- OSC 8 format: `\x1b]8;;<URL>\x1b\\<TEXT>\x1b]8;;\x1b\\`. The final `\x1b\\` is the ST (string terminator); some terminals also accept `\x07` (BEL) as the terminator, but `\x1b\\` is the standard.
+- We rely on the existing PR URL validation (Phase 4) which rejects control characters and non-`https://` schemes — so the URL going into the OSC 8 wrapper is safe to embed without further escaping.
+- No env-var opt-out (e.g. `NO_HYPERLINKS`) for now. Piped/non-TTY users already get plain text via `isTTY` gating, which is the dominant opt-out case. Add later if requested.

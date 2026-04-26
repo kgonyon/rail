@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { filterFeatureWorktrees, formatStats } from './status';
+import { filterFeatureWorktrees, formatStats, linkify } from './status';
 import type { WorktreeInfo, WorktreeStats } from '../lib/git';
 
 describe('filterFeatureWorktrees', () => {
@@ -43,12 +43,12 @@ describe('formatStats', () => {
   }
 
   it('returns ["clean"] when all categories are zero', () => {
-    expect(formatStats(makeStats(), 'main')).toEqual(['clean']);
+    expect(formatStats(makeStats(), 'main', { hyperlinks: false })).toEqual(['clean']);
   });
 
   it('formats only-staged changes without insertions/deletions block', () => {
     const stats = makeStats({ stagedFiles: 2, fileCount: 2, isDirty: true });
-    expect(formatStats(stats, 'main')).toEqual([
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual([
       '2 files changed (2 staged, 0 unstaged)',
     ]);
   });
@@ -61,7 +61,7 @@ describe('formatStats', () => {
       deletions: 5,
       isDirty: true,
     });
-    expect(formatStats(stats, 'main')).toEqual([
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual([
       '3 files changed (0 staged, 3 unstaged)  +12 -5',
     ]);
   });
@@ -75,46 +75,46 @@ describe('formatStats', () => {
       deletions: 0,
       isDirty: true,
     });
-    expect(formatStats(stats, 'main')).toEqual([
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual([
       '3 files changed (2 staged, 1 unstaged)  +7 -0',
     ]);
   });
 
   it('uses singular "file" when exactly one changed file', () => {
     const stats = makeStats({ stagedFiles: 1, fileCount: 1, isDirty: true });
-    expect(formatStats(stats, 'main')).toEqual([
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual([
       '1 file changed (1 staged, 0 unstaged)',
     ]);
   });
 
   it('formats only untracked plural', () => {
     const stats = makeStats({ untrackedFiles: 2, fileCount: 2, isDirty: true });
-    expect(formatStats(stats, 'main')).toEqual(['2 untracked files']);
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['2 untracked files']);
   });
 
   it('formats only untracked singular', () => {
     const stats = makeStats({ untrackedFiles: 1, fileCount: 1, isDirty: true });
-    expect(formatStats(stats, 'main')).toEqual(['1 untracked file']);
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['1 untracked file']);
   });
 
   it('formats only commits ahead plural', () => {
     const stats = makeStats({ commitsAhead: 3 });
-    expect(formatStats(stats, 'main')).toEqual(['3 commits ahead of main']);
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['3 commits ahead of main']);
   });
 
   it('formats only commits ahead singular', () => {
     const stats = makeStats({ commitsAhead: 1 });
-    expect(formatStats(stats, 'main')).toEqual(['1 commit ahead of main']);
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['1 commit ahead of main']);
   });
 
   it('renders ? when commitsAhead is -1 sentinel', () => {
     const stats = makeStats({ commitsAhead: -1 });
-    expect(formatStats(stats, 'main')).toEqual(['? commits ahead of main']);
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['? commits ahead of main']);
   });
 
   it('omits ahead line when commitsAhead is 0', () => {
     const stats = makeStats({ commitsAhead: 0 });
-    expect(formatStats(stats, 'main')).toEqual(['clean']);
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['clean']);
   });
 
   it('formats one open PR with the URL inlined on the same line', () => {
@@ -124,7 +124,7 @@ describe('formatStats', () => {
         prs: [{ number: 123, url: 'https://example.com/owner/repo/pull/123' }],
       },
     });
-    expect(formatStats(stats, 'main')).toEqual([
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual([
       '1 open PR: https://example.com/owner/repo/pull/123',
     ]);
   });
@@ -139,7 +139,7 @@ describe('formatStats', () => {
         ],
       },
     });
-    expect(formatStats(stats, 'main')).toEqual([
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual([
       '2 open PRs:',
       '  #123 https://example.com/owner/repo/pull/123',
       '  #456 https://example.com/owner/repo/pull/456',
@@ -157,7 +157,7 @@ describe('formatStats', () => {
         ],
       },
     });
-    expect(formatStats(stats, 'main')).toEqual([
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual([
       '3 open PRs:',
       '  #1 https://e/1',
       '  #2 https://e/2',
@@ -167,17 +167,17 @@ describe('formatStats', () => {
 
   it('renders ? open PRs when openPrs state is error', () => {
     const stats = makeStats({ openPrs: { state: 'error' } });
-    expect(formatStats(stats, 'main')).toEqual(['? open PRs']);
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['? open PRs']);
   });
 
   it('omits PR lines when openPrs state is unavailable', () => {
     const stats = makeStats({ openPrs: { state: 'unavailable' } });
-    expect(formatStats(stats, 'main')).toEqual(['clean']);
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['clean']);
   });
 
   it('omits PR lines when openPrs state is ok with zero entries', () => {
     const stats = makeStats({ openPrs: { state: 'ok', prs: [] } });
-    expect(formatStats(stats, 'main')).toEqual(['clean']);
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['clean']);
   });
 
   it('renders all four categories together in fixed order', () => {
@@ -195,7 +195,7 @@ describe('formatStats', () => {
         prs: [{ number: 7, url: 'https://example.com/owner/repo/pull/7' }],
       },
     });
-    expect(formatStats(stats, 'main')).toEqual([
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual([
       '3 files changed (2 staged, 1 unstaged)  +42 -7',
       '2 untracked files',
       '4 commits ahead of main',
@@ -205,6 +205,69 @@ describe('formatStats', () => {
 
   it('propagates a non-default branch name into the ahead line', () => {
     const stats = makeStats({ commitsAhead: 2 });
-    expect(formatStats(stats, 'master')).toEqual(['2 commits ahead of master']);
+    expect(formatStats(stats, 'master', { hyperlinks: false })).toEqual(['2 commits ahead of master']);
+  });
+
+  it('wraps a single PR URL in OSC 8 escapes when hyperlinks is true', () => {
+    const url = 'https://example.com/owner/repo/pull/123';
+    const stats = makeStats({
+      openPrs: {
+        state: 'ok',
+        prs: [{ number: 123, url }],
+      },
+    });
+    expect(formatStats(stats, 'main', { hyperlinks: true })).toEqual([
+      `1 open PR: ${linkify(url, true)}`,
+    ]);
+  });
+
+  it('wraps each multi-PR entry URL in OSC 8 escapes when hyperlinks is true', () => {
+    const url1 = 'https://example.com/owner/repo/pull/123';
+    const url2 = 'https://example.com/owner/repo/pull/456';
+    const stats = makeStats({
+      openPrs: {
+        state: 'ok',
+        prs: [
+          { number: 123, url: url1 },
+          { number: 456, url: url2 },
+        ],
+      },
+    });
+    expect(formatStats(stats, 'main', { hyperlinks: true })).toEqual([
+      '2 open PRs:',
+      `  #123 ${linkify(url1, true)}`,
+      `  #456 ${linkify(url2, true)}`,
+    ]);
+  });
+
+  it('renders multi-PR URLs plain when hyperlinks is false', () => {
+    const url1 = 'https://example.com/owner/repo/pull/123';
+    const url2 = 'https://example.com/owner/repo/pull/456';
+    const stats = makeStats({
+      openPrs: {
+        state: 'ok',
+        prs: [
+          { number: 123, url: url1 },
+          { number: 456, url: url2 },
+        ],
+      },
+    });
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual([
+      '2 open PRs:',
+      `  #123 ${url1}`,
+      `  #456 ${url2}`,
+    ]);
+  });
+});
+
+describe('linkify', () => {
+  it('returns the URL unchanged when hyperlinks is false', () => {
+    expect(linkify('https://example.com/x', false)).toBe('https://example.com/x');
+  });
+
+  it('wraps the URL in OSC 8 escape sequences when hyperlinks is true', () => {
+    expect(linkify('https://example.com/x', true)).toBe(
+      '\x1b]8;;https://example.com/x\x1b\\https://example.com/x\x1b]8;;\x1b\\',
+    );
   });
 });

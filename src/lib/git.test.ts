@@ -1,24 +1,48 @@
-import { describe, it, expect, mock } from 'bun:test';
+import { beforeEach, describe, it, expect, mock } from 'bun:test';
 
 /**
- * Mock handler for gitExec from ./shell.
- * Each getWorktreeStats test sets this to control shell command responses.
+ * Mock handlers for gitExec / ghExec from ./shell.
+ * Tests set these to control shell command responses.
  */
 type GitExecHandler = (root: string, args: string) => Promise<string>;
+type GhExecHandler = (cwd: string, args: string) => Promise<string>;
 let gitExecHandler: GitExecHandler = () =>
   Promise.reject(new Error('no handler configured'));
+let ghExecHandler: GhExecHandler = () =>
+  Promise.reject(new Error('no gh handler configured'));
+let ghExecCallCount = 0;
+const ghExecCalls: Array<{ cwd: string; args: string }> = [];
 
 mock.module('./shell', () => ({
   gitExec: (root: string, args: string) => gitExecHandler(root, args),
+  ghExec: (cwd: string, args: string) => {
+    ghExecCallCount++;
+    ghExecCalls.push({ cwd, args });
+    return ghExecHandler(cwd, args);
+  },
 }));
 
 import {
   parseSingleBlock,
   parsePorcelainOutput,
-  parsePorcelainFileCount,
+  parsePorcelainStatusBreakdown,
+  parseRevListCount,
   parseNumstatOutput,
+  getDefaultBranch,
   getWorktreeStats,
+  isGhAvailable,
+  isSafeRefName,
+  getOpenPrCount,
+  parseGhPrListJson,
+  __resetGhAvailableCache,
 } from './git';
+
+beforeEach(() => {
+  ghExecCallCount = 0;
+  ghExecCalls.length = 0;
+  ghExecHandler = () => Promise.reject(new Error('no gh handler configured'));
+  __resetGhAvailableCache();
+});
 
 describe('parseSingleBlock', () => {
   it('parses a complete worktree block', () => {
@@ -101,74 +125,213 @@ describe('parsePorcelainOutput', () => {
   });
 });
 
-describe('parsePorcelainFileCount', () => {
-  it('returns 0 for empty string', () => {
-    expect(parsePorcelainFileCount('')).toBe(0);
+describe('parsePorcelainStatusBreakdown', () => {
+  it('returns all zeros for empty input', () => {
+    expect(parsePorcelainStatusBreakdown('')).toEqual({
+      staged: 0,
+      unstaged: 0,
+      untracked: 0,
+      total: 0,
+    });
   });
 
-  it('returns 0 for whitespace-only output', () => {
-    expect(parsePorcelainFileCount('   \n  \n  ')).toBe(0);
+  it('returns all zeros for whitespace-only input', () => {
+    expect(parsePorcelainStatusBreakdown('   \n  ')).toEqual({
+      staged: 0,
+      unstaged: 0,
+      untracked: 0,
+      total: 0,
+    });
   });
 
-  it('counts a single modified file', () => {
-    expect(parsePorcelainFileCount(' M file.ts')).toBe(1);
+  it('bins staged-only modified file (M )', () => {
+    expect(parsePorcelainStatusBreakdown('M  file.ts')).toEqual({
+      staged: 1,
+      unstaged: 0,
+      untracked: 0,
+      total: 1,
+    });
   });
 
-  it('counts a single added file', () => {
-    expect(parsePorcelainFileCount('A  file.ts')).toBe(1);
+  it('bins unstaged-only modified file ( M)', () => {
+    expect(parsePorcelainStatusBreakdown(' M file.ts')).toEqual({
+      staged: 0,
+      unstaged: 1,
+      untracked: 0,
+      total: 1,
+    });
   });
 
-  it('counts a single deleted file', () => {
-    expect(parsePorcelainFileCount(' D file.ts')).toBe(1);
+  it('counts both bins for MM', () => {
+    expect(parsePorcelainStatusBreakdown('MM file.ts')).toEqual({
+      staged: 1,
+      unstaged: 1,
+      untracked: 0,
+      total: 1,
+    });
   });
 
-  it('counts a renamed file', () => {
-    expect(parsePorcelainFileCount('R  old.ts -> new.ts')).toBe(1);
+  it('bins staged added file (A )', () => {
+    expect(parsePorcelainStatusBreakdown('A  file.ts')).toEqual({
+      staged: 1,
+      unstaged: 0,
+      untracked: 0,
+      total: 1,
+    });
   });
 
-  it('counts untracked files', () => {
-    expect(parsePorcelainFileCount('?? file.ts')).toBe(1);
+  it('bins unstaged added ( A) — intent to add', () => {
+    expect(parsePorcelainStatusBreakdown(' A file.ts')).toEqual({
+      staged: 0,
+      unstaged: 1,
+      untracked: 0,
+      total: 1,
+    });
   });
 
-  it('counts mixed tracked and untracked files correctly', () => {
+  it('bins both bins for AM (added then modified)', () => {
+    expect(parsePorcelainStatusBreakdown('AM file.ts')).toEqual({
+      staged: 1,
+      unstaged: 1,
+      untracked: 0,
+      total: 1,
+    });
+  });
+
+  it('bins staged deleted (D )', () => {
+    expect(parsePorcelainStatusBreakdown('D  file.ts')).toEqual({
+      staged: 1,
+      unstaged: 0,
+      untracked: 0,
+      total: 1,
+    });
+  });
+
+  it('bins unstaged deleted ( D)', () => {
+    expect(parsePorcelainStatusBreakdown(' D file.ts')).toEqual({
+      staged: 0,
+      unstaged: 1,
+      untracked: 0,
+      total: 1,
+    });
+  });
+
+  it('bins staged renamed (R )', () => {
+    expect(parsePorcelainStatusBreakdown('R  old.ts -> new.ts')).toEqual({
+      staged: 1,
+      unstaged: 0,
+      untracked: 0,
+      total: 1,
+    });
+  });
+
+  it('bins staged copied (C )', () => {
+    expect(parsePorcelainStatusBreakdown('C  src.ts -> dst.ts')).toEqual({
+      staged: 1,
+      unstaged: 0,
+      untracked: 0,
+      total: 1,
+    });
+  });
+
+  it('bins unmerged (U )', () => {
+    expect(parsePorcelainStatusBreakdown('U  file.ts')).toEqual({
+      staged: 1,
+      unstaged: 0,
+      untracked: 0,
+      total: 1,
+    });
+  });
+
+  it('bins UU (both U)', () => {
+    expect(parsePorcelainStatusBreakdown('UU file.ts')).toEqual({
+      staged: 1,
+      unstaged: 1,
+      untracked: 0,
+      total: 1,
+    });
+  });
+
+  it('bins untracked (??)', () => {
+    expect(parsePorcelainStatusBreakdown('?? new.ts')).toEqual({
+      staged: 0,
+      unstaged: 0,
+      untracked: 1,
+      total: 1,
+    });
+  });
+
+  it('skips ignored (!!)', () => {
+    expect(parsePorcelainStatusBreakdown('!! ignored.ts')).toEqual({
+      staged: 0,
+      unstaged: 0,
+      untracked: 0,
+      total: 0,
+    });
+  });
+
+  it('handles a mix of all bins', () => {
     const output = [
-      ' M src/lib/git.ts',
-      '?? src/new-file.ts',
-      'A  src/added.ts',
+      'M  staged.ts',
+      ' M unstaged.ts',
+      'MM both.ts',
+      '?? new.ts',
+      '!! ignored.log',
     ].join('\n');
-    expect(parsePorcelainFileCount(output)).toBe(3);
+    expect(parsePorcelainStatusBreakdown(output)).toEqual({
+      staged: 2,
+      unstaged: 2,
+      untracked: 1,
+      total: 4,
+    });
   });
 
-  it('handles staged and unstaged changes to the same file as one file', () => {
-    expect(parsePorcelainFileCount('MM file.ts')).toBe(1);
-  });
-
-  it('handles all two-character XY status codes', () => {
+  it('handles multiple files in each bin', () => {
     const output = [
-      'AM staged-then-modified.ts',
-      'AD staged-then-deleted.ts',
-      'UU merge-conflict.ts',
+      'A  a1.ts',
+      'A  a2.ts',
+      ' M m1.ts',
+      ' M m2.ts',
+      '?? u1.ts',
+      '?? u2.ts',
+      '?? u3.ts',
     ].join('\n');
-    expect(parsePorcelainFileCount(output)).toBe(3);
+    expect(parsePorcelainStatusBreakdown(output)).toEqual({
+      staged: 2,
+      unstaged: 2,
+      untracked: 3,
+      total: 7,
+    });
+  });
+});
+
+describe('parseRevListCount', () => {
+  it('parses a numeric line', () => {
+    expect(parseRevListCount('5')).toBe(5);
   });
 
-  it('counts multiple untracked files correctly', () => {
-    const output = [
-      '?? file1.ts',
-      '?? file2.ts',
-      '?? dir/file3.ts',
-    ].join('\n');
-    expect(parsePorcelainFileCount(output)).toBe(3);
+  it('parses with surrounding whitespace', () => {
+    expect(parseRevListCount('  42\n')).toBe(42);
   });
 
-  it('ignores ignored files', () => {
-    const output = [
-      ' M tracked.ts',
-      '!! ignored.ts',
-      '?? untracked.ts',
-      '!! also-ignored.log',
-    ].join('\n');
-    expect(parsePorcelainFileCount(output)).toBe(2);
+  it('returns 0 for empty input', () => {
+    expect(parseRevListCount('')).toBe(0);
+  });
+
+  it('returns 0 for whitespace-only input', () => {
+    expect(parseRevListCount('   \n  ')).toBe(0);
+  });
+
+  it('returns 0 for non-numeric input', () => {
+    expect(parseRevListCount('not a number')).toBe(0);
+  });
+
+  it('parses 0 as 0', () => {
+    expect(parseRevListCount('0')).toBe(0);
+  });
+
+  it('parses larger numbers', () => {
+    expect(parseRevListCount('1234')).toBe(1234);
   });
 });
 
@@ -257,17 +420,216 @@ describe('parseNumstatOutput', () => {
   });
 });
 
+describe('getDefaultBranch', () => {
+  it('parses main from origin/HEAD ref', async () => {
+    gitExecHandler = () => Promise.resolve('refs/remotes/origin/main\n');
+    expect(await getDefaultBranch('/fake/path')).toBe('main');
+  });
+
+  it('parses master from origin/HEAD ref', async () => {
+    gitExecHandler = () => Promise.resolve('refs/remotes/origin/master\n');
+    expect(await getDefaultBranch('/fake/path')).toBe('master');
+  });
+
+  it('falls back to main on subprocess error', async () => {
+    gitExecHandler = () => Promise.reject(new Error('not a git repo'));
+    expect(await getDefaultBranch('/fake/path')).toBe('main');
+  });
+
+  it('falls back to main when ref is malformed', async () => {
+    gitExecHandler = () => Promise.resolve('something-unexpected\n');
+    expect(await getDefaultBranch('/fake/path')).toBe('main');
+  });
+
+  it('falls back to main when ref segment contains shell metacharacters', async () => {
+    gitExecHandler = () =>
+      Promise.resolve('refs/remotes/origin/main;rm -rf /\n');
+    expect(await getDefaultBranch('/fake/path')).toBe('main');
+  });
+});
+
+describe('isSafeRefName', () => {
+  it('accepts main', () => {
+    expect(isSafeRefName('main')).toBe(true);
+  });
+
+  it('accepts master', () => {
+    expect(isSafeRefName('master')).toBe(true);
+  });
+
+  it('accepts feature/foo', () => {
+    expect(isSafeRefName('feature/foo')).toBe(true);
+  });
+
+  it('accepts release-1.0', () => {
+    expect(isSafeRefName('release-1.0')).toBe(true);
+  });
+
+  it('accepts feat_x', () => {
+    expect(isSafeRefName('feat_x')).toBe(true);
+  });
+
+  it('accepts dev/keith/x', () => {
+    expect(isSafeRefName('dev/keith/x')).toBe(true);
+  });
+
+  it('rejects empty string', () => {
+    expect(isSafeRefName('')).toBe(false);
+  });
+
+  it('rejects names containing semicolons', () => {
+    expect(isSafeRefName('main;rm')).toBe(false);
+  });
+
+  it('rejects names containing pipes', () => {
+    expect(isSafeRefName('main|cat')).toBe(false);
+  });
+
+  it('rejects names containing ampersands', () => {
+    expect(isSafeRefName('main&background')).toBe(false);
+  });
+
+  it('rejects names containing dollar signs', () => {
+    expect(isSafeRefName('main$VAR')).toBe(false);
+  });
+
+  it('rejects names containing backticks', () => {
+    expect(isSafeRefName('main`whoami`')).toBe(false);
+  });
+
+  it('rejects names containing spaces', () => {
+    expect(isSafeRefName('main branch')).toBe(false);
+  });
+
+  it('rejects names containing newlines', () => {
+    expect(isSafeRefName('main\nrm')).toBe(false);
+  });
+
+  it('rejects names longer than 255 characters', () => {
+    expect(isSafeRefName('a'.repeat(256))).toBe(false);
+  });
+
+  it('accepts a name exactly 255 characters', () => {
+    expect(isSafeRefName('a'.repeat(255))).toBe(true);
+  });
+});
+
+describe('parseGhPrListJson', () => {
+  it('returns 0 for an empty array', () => {
+    expect(parseGhPrListJson('[]')).toBe(0);
+  });
+
+  it('returns 1 for a single element', () => {
+    expect(parseGhPrListJson('[{"number":42}]')).toBe(1);
+  });
+
+  it('returns N for multiple elements', () => {
+    expect(parseGhPrListJson('[{"number":1},{"number":2},{"number":3}]')).toBe(3);
+  });
+
+  it('returns -1 for malformed JSON', () => {
+    expect(parseGhPrListJson('not json')).toBe(-1);
+  });
+
+  it('returns -1 for an object (non-array) result', () => {
+    expect(parseGhPrListJson('{"number":1}')).toBe(-1);
+  });
+
+  it('returns -1 for null', () => {
+    expect(parseGhPrListJson('null')).toBe(-1);
+  });
+});
+
+describe('isGhAvailable', () => {
+  it('returns true when gh auth status succeeds', async () => {
+    ghExecHandler = () => Promise.resolve('Logged in to github.com');
+    expect(await isGhAvailable()).toBe(true);
+  });
+
+  it('returns false when gh auth status fails', async () => {
+    ghExecHandler = () => Promise.reject(new Error('not authenticated'));
+    expect(await isGhAvailable()).toBe(false);
+  });
+
+  it('caches the result across multiple calls', async () => {
+    ghExecHandler = () => Promise.resolve('Logged in');
+    await isGhAvailable();
+    await isGhAvailable();
+    expect(ghExecCallCount).toBe(1);
+  });
+
+  it('caches the false result too', async () => {
+    ghExecHandler = () => Promise.reject(new Error('nope'));
+    expect(await isGhAvailable()).toBe(false);
+    expect(await isGhAvailable()).toBe(false);
+    expect(ghExecCallCount).toBe(1);
+  });
+});
+
+describe('getOpenPrCount', () => {
+  it('returns the count from gh JSON output', async () => {
+    ghExecHandler = () =>
+      Promise.resolve('[{"number":1},{"number":2}]');
+    expect(await getOpenPrCount('/fake/path', 'feature/x')).toBe(2);
+  });
+
+  it('returns -1 on subprocess failure', async () => {
+    ghExecHandler = () => Promise.reject(new Error('gh failed'));
+    expect(await getOpenPrCount('/fake/path', 'feature/x')).toBe(-1);
+  });
+
+  it('strips refs/heads/ prefix before invoking gh', async () => {
+    ghExecHandler = () => Promise.resolve('[]');
+    await getOpenPrCount('/fake/path', 'refs/heads/feature/x');
+    expect(ghExecCalls).toHaveLength(1);
+    expect(ghExecCalls[0]?.args).toBe(
+      'pr list --head feature/x --state open --json number',
+    );
+    expect(ghExecCalls[0]?.cwd).toBe('/fake/path');
+  });
+
+  it('passes branch through unchanged when no refs/heads/ prefix', async () => {
+    ghExecHandler = () => Promise.resolve('[]');
+    await getOpenPrCount('/fake/path', 'feature/x');
+    expect(ghExecCalls[0]?.args).toBe(
+      'pr list --head feature/x --state open --json number',
+    );
+  });
+
+  it('returns -1 without invoking ghExec for a malicious branch name', async () => {
+    ghExecHandler = () => Promise.resolve('[]');
+    const result = await getOpenPrCount(
+      '/fake/path',
+      'feature/x;rm -rf /',
+    );
+    expect(result).toBe(-1);
+    expect(ghExecCallCount).toBe(0);
+    expect(ghExecCalls).toHaveLength(0);
+  });
+});
+
 describe('getWorktreeStats', () => {
+  const defaultOptions = {
+    defaultBranch: 'main',
+    branch: 'refs/heads/feature/x',
+    ghAvailable: false,
+  };
+
   it('returns clean stats when git status --porcelain fails', async () => {
     gitExecHandler = () => Promise.reject(new Error('git status failed'));
 
-    const stats = await getWorktreeStats('/fake/path');
+    const stats = await getWorktreeStats('/fake/path', defaultOptions);
 
     expect(stats).toEqual({
       fileCount: 0,
+      stagedFiles: 0,
+      unstagedFiles: 0,
+      untrackedFiles: 0,
       insertions: 0,
       deletions: 0,
       isDirty: false,
+      commitsAhead: 0,
+      openPrCount: null,
     });
   });
 
@@ -276,34 +638,193 @@ describe('getWorktreeStats', () => {
       if (args.includes('diff HEAD --numstat')) {
         return Promise.reject(new Error('git diff failed'));
       }
+      if (args.includes('rev-list')) {
+        return Promise.resolve('0\n');
+      }
       return Promise.resolve(' M file.ts\n?? new.ts');
     };
 
-    const stats = await getWorktreeStats('/fake/path');
+    const stats = await getWorktreeStats('/fake/path', defaultOptions);
 
     expect(stats).toEqual({
       fileCount: 2,
+      stagedFiles: 0,
+      unstagedFiles: 1,
+      untrackedFiles: 1,
       insertions: 0,
       deletions: 0,
       isDirty: true,
+      commitsAhead: 0,
+      openPrCount: null,
     });
   });
 
-  it('returns full stats when both commands succeed', async () => {
+  it('returns full stats with breakdown when commands succeed', async () => {
     gitExecHandler = (_root: string, args: string) => {
       if (args.includes('diff HEAD --numstat')) {
         return Promise.resolve('10\t5\tsrc/lib/git.ts\n20\t3\tsrc/new.ts');
       }
+      if (args.includes('rev-list')) {
+        return Promise.resolve('4\n');
+      }
       return Promise.resolve(' M src/lib/git.ts\n?? src/new.ts\nA  added.ts');
     };
 
-    const stats = await getWorktreeStats('/fake/path');
+    const stats = await getWorktreeStats('/fake/path', defaultOptions);
 
     expect(stats).toEqual({
       fileCount: 3,
+      stagedFiles: 1,
+      unstagedFiles: 1,
+      untrackedFiles: 1,
       insertions: 30,
       deletions: 8,
       isDirty: true,
+      commitsAhead: 4,
+      openPrCount: null,
     });
+  });
+
+  it('short-circuits rev-list when branch equals defaultBranch', async () => {
+    let revListCalled = false;
+    gitExecHandler = (_root: string, args: string) => {
+      if (args.includes('rev-list')) {
+        revListCalled = true;
+        return Promise.resolve('99\n');
+      }
+      if (args.includes('diff HEAD --numstat')) {
+        return Promise.resolve('');
+      }
+      return Promise.resolve('');
+    };
+
+    const stats = await getWorktreeStats('/fake/path', {
+      defaultBranch: 'main',
+      branch: 'main',
+      ghAvailable: false,
+    });
+
+    expect(revListCalled).toBe(false);
+    expect(stats.commitsAhead).toBe(0);
+  });
+
+  it('short-circuits rev-list when refs/heads/<branch> equals defaultBranch', async () => {
+    let revListCalled = false;
+    gitExecHandler = (_root: string, args: string) => {
+      if (args.includes('rev-list')) {
+        revListCalled = true;
+        return Promise.resolve('99\n');
+      }
+      return Promise.resolve('');
+    };
+
+    await getWorktreeStats('/fake/path', {
+      defaultBranch: 'main',
+      branch: 'refs/heads/main',
+      ghAvailable: false,
+    });
+
+    expect(revListCalled).toBe(false);
+  });
+
+  it('returns positive commitsAhead from rev-list output on clean tree', async () => {
+    gitExecHandler = (_root: string, args: string) => {
+      if (args.includes('rev-list')) return Promise.resolve('7\n');
+      if (args.includes('status --porcelain')) return Promise.resolve('');
+      return Promise.resolve('');
+    };
+
+    const stats = await getWorktreeStats('/fake/path', defaultOptions);
+    expect(stats.commitsAhead).toBe(7);
+    expect(stats.isDirty).toBe(false);
+  });
+
+  it('sets commitsAhead to -1 when rev-list fails', async () => {
+    gitExecHandler = (_root: string, args: string) => {
+      if (args.includes('rev-list')) {
+        return Promise.reject(new Error('no upstream'));
+      }
+      if (args.includes('diff HEAD --numstat')) {
+        return Promise.resolve('1\t1\tfile.ts');
+      }
+      return Promise.resolve(' M file.ts');
+    };
+
+    const stats = await getWorktreeStats('/fake/path', defaultOptions);
+    expect(stats.commitsAhead).toBe(-1);
+    expect(stats.isDirty).toBe(true);
+  });
+
+  it('populates new bin fields with multiple staged + unstaged + untracked', async () => {
+    gitExecHandler = (_root: string, args: string) => {
+      if (args.includes('rev-list')) return Promise.resolve('2\n');
+      if (args.includes('diff HEAD --numstat')) return Promise.resolve('');
+      const porcelain = [
+        'M  staged1.ts',
+        'A  staged2.ts',
+        ' M unstaged1.ts',
+        'MM both.ts',
+        '?? new1.ts',
+        '?? new2.ts',
+      ].join('\n');
+      return Promise.resolve(porcelain);
+    };
+
+    const stats = await getWorktreeStats('/fake/path', defaultOptions);
+    expect(stats.stagedFiles).toBe(3);
+    expect(stats.unstagedFiles).toBe(2);
+    expect(stats.untrackedFiles).toBe(2);
+    expect(stats.fileCount).toBe(6);
+    expect(stats.commitsAhead).toBe(2);
+  });
+
+  it('short-circuits gh pr list when ghAvailable is false', async () => {
+    gitExecHandler = (_root: string, args: string) => {
+      if (args.includes('rev-list')) return Promise.resolve('0\n');
+      if (args.includes('diff HEAD --numstat')) return Promise.resolve('');
+      return Promise.resolve('');
+    };
+    ghExecHandler = () => Promise.resolve('[{"number":1}]');
+
+    const stats = await getWorktreeStats('/fake/path', defaultOptions);
+
+    expect(stats.openPrCount).toBeNull();
+    const prListCalls = ghExecCalls.filter((c) => c.args.includes('pr list'));
+    expect(prListCalls).toHaveLength(0);
+  });
+
+  it('populates openPrCount when ghAvailable is true', async () => {
+    gitExecHandler = (_root: string, args: string) => {
+      if (args.includes('rev-list')) return Promise.resolve('0\n');
+      if (args.includes('diff HEAD --numstat')) return Promise.resolve('');
+      return Promise.resolve('');
+    };
+    ghExecHandler = () =>
+      Promise.resolve('[{"number":1},{"number":2}]');
+
+    const stats = await getWorktreeStats('/fake/path', {
+      defaultBranch: 'main',
+      branch: 'refs/heads/feature/x',
+      ghAvailable: true,
+    });
+
+    expect(stats.openPrCount).toBe(2);
+  });
+
+  it('returns -1 openPrCount when ghAvailable is true but gh subprocess fails', async () => {
+    gitExecHandler = (_root: string, args: string) => {
+      if (args.includes('rev-list')) return Promise.resolve('0\n');
+      if (args.includes('diff HEAD --numstat')) return Promise.resolve('');
+      return Promise.resolve('');
+    };
+    ghExecHandler = () => Promise.reject(new Error('gh failed'));
+
+    const stats = await getWorktreeStats('/fake/path', {
+      defaultBranch: 'main',
+      branch: 'refs/heads/feature/x',
+      ghAvailable: true,
+    });
+
+    expect(stats.openPrCount).toBe(-1);
   });
 });

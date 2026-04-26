@@ -27,54 +27,143 @@ describe('filterFeatureWorktrees', () => {
 });
 
 describe('formatStats', () => {
-  it('returns clean when isDirty is false', () => {
-    const stats: WorktreeStats = { fileCount: 0, insertions: 0, deletions: 0, isDirty: false };
-    expect(formatStats(stats)).toBe('clean');
+  function makeStats(overrides: Partial<WorktreeStats> = {}): WorktreeStats {
+    return {
+      fileCount: 0,
+      stagedFiles: 0,
+      unstagedFiles: 0,
+      untrackedFiles: 0,
+      insertions: 0,
+      deletions: 0,
+      isDirty: false,
+      commitsAhead: 0,
+      openPrCount: 0,
+      ...overrides,
+    };
+  }
+
+  it('returns ["clean"] when all categories are zero', () => {
+    expect(formatStats(makeStats(), 'main')).toEqual(['clean']);
   });
 
-  it('returns clean for zero file count with zero changes', () => {
-    const stats: WorktreeStats = { fileCount: 0, insertions: 0, deletions: 0, isDirty: true };
-    expect(formatStats(stats)).toBe('clean');
+  it('formats only-staged changes without insertions/deletions block', () => {
+    const stats = makeStats({ stagedFiles: 2, fileCount: 2, isDirty: true });
+    expect(formatStats(stats, 'main')).toEqual([
+      '2 files changed (2 staged, 0 unstaged)',
+    ]);
   });
 
-  it('returns formatted string for dirty worktree', () => {
-    const stats: WorktreeStats = { fileCount: 3, insertions: 10, deletions: 5, isDirty: true };
-    expect(formatStats(stats)).toBe('3 changed  +10 -5');
+  it('formats only-unstaged changes with insertions and deletions', () => {
+    const stats = makeStats({
+      unstagedFiles: 3,
+      fileCount: 3,
+      insertions: 12,
+      deletions: 5,
+      isDirty: true,
+    });
+    expect(formatStats(stats, 'main')).toEqual([
+      '3 files changed (0 staged, 3 unstaged)  +12 -5',
+    ]);
   });
 
-  it('formats single file with only insertions', () => {
-    const stats: WorktreeStats = { fileCount: 1, insertions: 7, deletions: 0, isDirty: true };
-    expect(formatStats(stats)).toBe('1 changed  +7 -0');
+  it('combines staged and unstaged file counts', () => {
+    const stats = makeStats({
+      stagedFiles: 2,
+      unstagedFiles: 1,
+      fileCount: 3,
+      insertions: 7,
+      deletions: 0,
+      isDirty: true,
+    });
+    expect(formatStats(stats, 'main')).toEqual([
+      '3 files changed (2 staged, 1 unstaged)  +7 -0',
+    ]);
   });
 
-  it('formats single file with only deletions', () => {
-    const stats: WorktreeStats = { fileCount: 1, insertions: 0, deletions: 12, isDirty: true };
-    expect(formatStats(stats)).toBe('1 changed  +0 -12');
+  it('uses singular "file" when exactly one changed file', () => {
+    const stats = makeStats({ stagedFiles: 1, fileCount: 1, isDirty: true });
+    expect(formatStats(stats, 'main')).toEqual([
+      '1 file changed (1 staged, 0 unstaged)',
+    ]);
   });
 
-  it('formats untracked-only changes with zero line counts', () => {
-    const stats: WorktreeStats = { fileCount: 2, insertions: 0, deletions: 0, isDirty: true };
-    expect(formatStats(stats)).toBe('2 changed  +0 -0');
+  it('formats only untracked plural', () => {
+    const stats = makeStats({ untrackedFiles: 2, fileCount: 2, isDirty: true });
+    expect(formatStats(stats, 'main')).toEqual(['2 untracked files']);
   });
 
-  it('never returns "0 changed  +0 -0"', () => {
-    const stats: WorktreeStats = { fileCount: 0, insertions: 0, deletions: 0, isDirty: true };
-    expect(formatStats(stats)).not.toBe('0 changed  +0 -0');
-    expect(formatStats(stats)).toBe('clean');
+  it('formats only untracked singular', () => {
+    const stats = makeStats({ untrackedFiles: 1, fileCount: 1, isDirty: true });
+    expect(formatStats(stats, 'main')).toEqual(['1 untracked file']);
   });
 
-  it('formats large numbers correctly', () => {
-    const stats: WorktreeStats = { fileCount: 150, insertions: 10000, deletions: 5432, isDirty: true };
-    expect(formatStats(stats)).toBe('150 changed  +10000 -5432');
+  it('formats only commits ahead plural', () => {
+    const stats = makeStats({ commitsAhead: 3 });
+    expect(formatStats(stats, 'main')).toEqual(['3 commits ahead of main']);
   });
 
-  it('uses double-space separator between changed and counts', () => {
-    const stats: WorktreeStats = { fileCount: 3, insertions: 10, deletions: 5, isDirty: true };
-    const result = formatStats(stats);
-    expect(result).toContain('changed  +');
-    expect(result).not.toContain('changed +');
-    // Verify exactly two spaces
-    const match = result.match(/changed( +)\+/);
-    expect(match?.[1]).toBe('  ');
+  it('formats only commits ahead singular', () => {
+    const stats = makeStats({ commitsAhead: 1 });
+    expect(formatStats(stats, 'main')).toEqual(['1 commit ahead of main']);
+  });
+
+  it('renders ? when commitsAhead is -1 sentinel', () => {
+    const stats = makeStats({ commitsAhead: -1 });
+    expect(formatStats(stats, 'main')).toEqual(['? commits ahead of main']);
+  });
+
+  it('omits ahead line when commitsAhead is 0', () => {
+    const stats = makeStats({ commitsAhead: 0 });
+    expect(formatStats(stats, 'main')).toEqual(['clean']);
+  });
+
+  it('formats only PR singular as "1 open PR"', () => {
+    const stats = makeStats({ openPrCount: 1 });
+    expect(formatStats(stats, 'main')).toEqual(['1 open PR']);
+  });
+
+  it('formats only PR plural as "N open PRs"', () => {
+    const stats = makeStats({ openPrCount: 2 });
+    expect(formatStats(stats, 'main')).toEqual(['2 open PRs']);
+  });
+
+  it('renders ? when openPrCount is -1 sentinel', () => {
+    const stats = makeStats({ openPrCount: -1 });
+    expect(formatStats(stats, 'main')).toEqual(['? open PRs']);
+  });
+
+  it('omits PR line when openPrCount is null (gh unavailable)', () => {
+    const stats = makeStats({ openPrCount: null });
+    expect(formatStats(stats, 'main')).toEqual(['clean']);
+  });
+
+  it('omits PR line when openPrCount is 0', () => {
+    const stats = makeStats({ openPrCount: 0 });
+    expect(formatStats(stats, 'main')).toEqual(['clean']);
+  });
+
+  it('renders all four categories together in fixed order', () => {
+    const stats = makeStats({
+      stagedFiles: 2,
+      unstagedFiles: 1,
+      untrackedFiles: 2,
+      fileCount: 5,
+      insertions: 42,
+      deletions: 7,
+      isDirty: true,
+      commitsAhead: 4,
+      openPrCount: 1,
+    });
+    expect(formatStats(stats, 'main')).toEqual([
+      '3 files changed (2 staged, 1 unstaged)  +42 -7',
+      '2 untracked files',
+      '4 commits ahead of main',
+      '1 open PR',
+    ]);
+  });
+
+  it('propagates a non-default branch name into the ahead line', () => {
+    const stats = makeStats({ commitsAhead: 2 });
+    expect(formatStats(stats, 'master')).toEqual(['2 commits ahead of master']);
   });
 });

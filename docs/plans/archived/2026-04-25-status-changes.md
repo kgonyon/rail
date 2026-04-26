@@ -40,6 +40,8 @@ Surface four distinct kinds of in-flight state per worktree in `rail status`: (1
 - **FR-9:** Stat collection across worktrees is parallel (`Promise.all`).
 - **FR-10:** Default branch is detected via `git symbolic-ref refs/remotes/origin/HEAD`, falling back to `main`.
 - **FR-11:** When `rail status` writes to a TTY, each rendered PR URL is wrapped in an OSC 8 hyperlink escape so terminal emulators that support the standard render it as a clickable link. When stdout is not a TTY (piped, redirected, or non-interactive), the URL is emitted as plain text with no escape sequences.
+- **FR-12:** TTY detection uses `tty.isatty(1)` as the primary signal (Bun's `process.stdout.isTTY` is unreliable — returns `undefined` on real TTYs in some build modes), with `process.stdout.isTTY === true` as a fallback.
+- **FR-13:** A `RAIL_HYPERLINKS` env var overrides detection: `always` forces emission, `never` forces plain text. Any other value falls through to detection.
 
 ### Non-Functional Requirements
 - **Performance:** `rail status` should stay snappy for typical 5–20 worktrees. With parallelization, total wall time ≈ slowest single worktree's stat fetch (~few hundred ms with `gh` involved).

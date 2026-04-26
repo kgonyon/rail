@@ -1,6 +1,7 @@
 import { defineCommand } from 'citty';
 import consola from 'consola';
 import { basename } from 'path';
+import { isatty } from 'tty';
 import { getGitRoot, isRailProject } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { loadPortAllocations, getPortsForFeature } from '../lib/ports';
@@ -41,7 +42,7 @@ export default defineCommand({
 
     consola.info(`Active features (${features.length}):\n`);
 
-    const hyperlinks = process.stdout.isTTY === true;
+    const hyperlinks = shouldEmitHyperlinks();
     const renders = await collectStats(features, { defaultBranch, ghAvailable });
     for (const render of renders) {
       printFeatureStatus(render, { allocations, config, defaultBranch, hyperlinks });
@@ -52,6 +53,23 @@ export default defineCommand({
 /** @internal */
 export function filterFeatureWorktrees(worktrees: WorktreeInfo[], treesDir: string): WorktreeInfo[] {
   return worktrees.filter((wt) => wt.path.includes(`/${treesDir}/`));
+}
+
+/**
+ * Decide whether to emit OSC 8 hyperlink escapes.
+ *
+ * `RAIL_HYPERLINKS=always|never` overrides detection. Otherwise we treat
+ * stdout as a TTY when either `tty.isatty(1)` or `process.stdout.isTTY` is
+ * truthy — Bun returns `undefined` from `process.stdout.isTTY` even on real
+ * TTYs in some build modes, so we need both checks.
+ * @internal
+ */
+export function shouldEmitHyperlinks(env = process.env): boolean {
+  const override = env.RAIL_HYPERLINKS?.toLowerCase();
+  if (override === 'always') return true;
+  if (override === 'never') return false;
+  if (isatty(1)) return true;
+  return process.stdout.isTTY === true;
 }
 
 interface CollectStatsOptions {

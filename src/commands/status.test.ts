@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { filterFeatureWorktrees, formatStats, linkify } from './status';
+import { filterFeatureWorktrees, formatStats, linkify, shouldEmitHyperlinks } from './status';
 import type { WorktreeInfo, WorktreeStats } from '../lib/git';
 
 describe('filterFeatureWorktrees', () => {
@@ -269,5 +269,25 @@ describe('linkify', () => {
     expect(linkify('https://example.com/x', true)).toBe(
       '\x1b]8;;https://example.com/x\x1b\\https://example.com/x\x1b]8;;\x1b\\',
     );
+  });
+});
+
+describe('shouldEmitHyperlinks', () => {
+  it('returns true when RAIL_HYPERLINKS=always', () => {
+    expect(shouldEmitHyperlinks({ RAIL_HYPERLINKS: 'always' })).toBe(true);
+  });
+
+  it('returns false when RAIL_HYPERLINKS=never', () => {
+    expect(shouldEmitHyperlinks({ RAIL_HYPERLINKS: 'never' })).toBe(false);
+  });
+
+  it('is case-insensitive on the override value', () => {
+    expect(shouldEmitHyperlinks({ RAIL_HYPERLINKS: 'ALWAYS' })).toBe(true);
+    expect(shouldEmitHyperlinks({ RAIL_HYPERLINKS: 'Never' })).toBe(false);
+  });
+
+  it('falls back to TTY detection when override is unset', () => {
+    const result = shouldEmitHyperlinks({});
+    expect(typeof result).toBe('boolean');
   });
 });

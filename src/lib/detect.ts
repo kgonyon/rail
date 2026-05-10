@@ -1,11 +1,11 @@
 export function detectFeatureFromCwd(cwd: string, treesDir: string): string | null {
   const normalized = cwd.replace(/\\/g, '/');
-  const treesSeg = treesDir.replace(/\/$/, '');
-  const idx = normalized.indexOf(`/${treesSeg}/`);
+  const dir = treesDir.replace(/\\/g, '/').replace(/\/$/, '');
+  const prefix = `${dir}/`;
 
-  if (idx === -1) return null;
+  if (!normalized.startsWith(prefix)) return null;
 
-  const afterTrees = normalized.slice(idx + treesSeg.length + 2);
+  const afterTrees = normalized.slice(prefix.length);
   const feature = afterTrees.split('/')[0];
 
   return feature || null;

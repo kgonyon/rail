@@ -15,19 +15,45 @@ describe('filterFeatureWorktrees', () => {
   ];
 
   it('returns only worktrees inside trees dir', () => {
-    const result = filterFeatureWorktrees(worktrees, '.trees');
+    const result = filterFeatureWorktrees(worktrees, '/projects/app/.trees');
     expect(result).toHaveLength(2);
-    expect(result[0].path).toContain('feat-a');
-    expect(result[1].path).toContain('feat-b');
+    expect(result[0]!.path).toContain('feat-a');
+    expect(result[1]!.path).toContain('feat-b');
+  });
+
+  it('tolerates a trailing slash on treesDir', () => {
+    const result = filterFeatureWorktrees(worktrees, '/projects/app/.trees/');
+    expect(result).toHaveLength(2);
   });
 
   it('returns empty array when no features match', () => {
-    const result = filterFeatureWorktrees(worktrees, '.worktrees');
+    const result = filterFeatureWorktrees(worktrees, '/projects/app/.worktrees');
     expect(result).toEqual([]);
   });
 
+  it('matches trees dirs outside the project root', () => {
+    const external: WorktreeInfo[] = [
+      { path: '/projects/app', head: 'abc', branch: 'refs/heads/main' },
+      {
+        path: '/Users/me/.rail/repos/app/temp',
+        head: 'def',
+        branch: 'refs/heads/feature/temp',
+      },
+    ];
+    const result = filterFeatureWorktrees(external, '/Users/me/.rail/repos/app');
+    expect(result).toHaveLength(1);
+    expect(result[0]!.path).toBe('/Users/me/.rail/repos/app/temp');
+  });
+
+  it('does not match a sibling dir that shares a prefix', () => {
+    const items: WorktreeInfo[] = [
+      { path: '/foo/bar-other/feat', head: 'a', branch: 'refs/heads/feature/feat' },
+    ];
+    expect(filterFeatureWorktrees(items, '/foo/bar')).toEqual([]);
+  });
+
   it('handles empty worktree list', () => {
-    expect(filterFeatureWorktrees([], '.trees')).toEqual([]);
+    expect(filterFeatureWorktrees([], '/projects/app/.trees')).toEqual([]);
   });
 });
 

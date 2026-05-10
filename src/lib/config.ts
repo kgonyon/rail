@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'fs';
 import { parse } from 'yaml';
-import { getConfigPath, getLocalConfigPath } from './paths';
+import { getConfigPath, getLocalConfigPath, resolveWorktreesDir } from './paths';
 import type { RailConfig } from '../types/config';
 
 /** @internal */
@@ -37,6 +37,8 @@ export function loadConfig(root: string): RailConfig {
     const localConfig = parse(localRaw);
     config = deepMerge(config, localConfig) as RailConfig;
   }
+
+  config.worktrees.dir = resolveWorktreesDir(root, config.worktrees.dir);
 
   return config;
 }

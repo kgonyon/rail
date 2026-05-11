@@ -1,5 +1,5 @@
 import { $ } from 'bun';
-import { join } from 'path';
+import { isAbsolute, join } from 'path';
 import { existsSync } from 'fs';
 import { homedir } from 'os';
 
@@ -34,8 +34,23 @@ export async function getProjectRoot(): Promise<string> {
   return gitRoot;
 }
 
-export function getWorktreePath(root: string, dir: string, feature: string): string {
-  return join(root, dir, feature);
+export function getWorktreePath(dir: string, feature: string): string {
+  return join(dir, feature);
+}
+
+/**
+ * Resolve `worktrees.dir` to an absolute path.
+ * - `~` and `~/...` expand against the current user's home directory.
+ * - Absolute paths are returned unchanged.
+ * - Everything else is resolved relative to the project root.
+ *
+ * `~user` (other-user home) and env-var expansion are intentionally not supported.
+ */
+export function resolveWorktreesDir(root: string, dir: string): string {
+  if (dir === '~') return homedir();
+  if (dir.startsWith('~/')) return join(homedir(), dir.slice(2));
+  if (isAbsolute(dir)) return dir;
+  return join(root, dir);
 }
 
 export function getConfigPath(root: string): string {

@@ -52,7 +52,8 @@ export default defineCommand({
 
 /** @internal */
 export function filterFeatureWorktrees(worktrees: WorktreeInfo[], treesDir: string): WorktreeInfo[] {
-  return worktrees.filter((wt) => wt.path.includes(`/${treesDir}/`));
+  const prefix = `${treesDir.replace(/\/$/, '')}/`;
+  return worktrees.filter((wt) => wt.path.startsWith(prefix));
 }
 
 /**

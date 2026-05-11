@@ -9,18 +9,53 @@ import {
   getUserConfigPath,
   isRelativePath,
   resolveRelativePath,
+  resolveWorktreesDir,
 } from './paths';
 
 describe('getWorktreePath', () => {
-  it('joins root, dir, and feature', () => {
-    expect(getWorktreePath('/projects/app', '.trees', 'my-feature')).toBe(
-      join('/projects/app', '.trees', 'my-feature'),
+  it('joins an absolute trees dir with the feature name', () => {
+    expect(getWorktreePath('/projects/app/.trees', 'my-feature')).toBe(
+      join('/projects/app/.trees', 'my-feature'),
     );
   });
 
-  it('handles nested directory names', () => {
-    expect(getWorktreePath('/root', 'worktrees/active', 'feat')).toBe(
-      join('/root', 'worktrees/active', 'feat'),
+  it('handles trees dirs outside the project', () => {
+    expect(getWorktreePath('/Users/me/.rail/repos/app', 'feat')).toBe(
+      join('/Users/me/.rail/repos/app', 'feat'),
+    );
+  });
+});
+
+describe('resolveWorktreesDir', () => {
+  it('passes absolute paths through unchanged', () => {
+    expect(resolveWorktreesDir('/projects/app', '/abs/path')).toBe('/abs/path');
+  });
+
+  it('expands a bare ~', () => {
+    expect(resolveWorktreesDir('/projects/app', '~')).toBe(homedir());
+  });
+
+  it('expands ~/foo to homedir/foo', () => {
+    expect(resolveWorktreesDir('/projects/app', '~/.rail/repos/app')).toBe(
+      join(homedir(), '.rail/repos/app'),
+    );
+  });
+
+  it('preserves a trailing slash on tilde paths (downstream code strips it)', () => {
+    expect(resolveWorktreesDir('/projects/app', '~/foo/')).toBe(
+      join(homedir(), 'foo/'),
+    );
+  });
+
+  it('joins relative paths against the project root', () => {
+    expect(resolveWorktreesDir('/projects/app', 'trees')).toBe(
+      join('/projects/app', 'trees'),
+    );
+  });
+
+  it('does not expand ~user (other-user home)', () => {
+    expect(resolveWorktreesDir('/projects/app', '~bob/foo')).toBe(
+      join('/projects/app', '~bob/foo'),
     );
   });
 });

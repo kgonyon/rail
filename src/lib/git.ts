@@ -35,15 +35,25 @@ export async function addWorktree(
   treePath: string,
   branchPrefix: string,
   feature: string,
+  startPoint?: string,
 ): Promise<void> {
   const branch = `${branchPrefix}${feature}`;
   const branchExists = await checkBranchExists(root, branch);
 
   if (branchExists) {
     await $`git -C ${root} worktree add ${treePath} ${branch}`.quiet();
-  } else {
-    await $`git -C ${root} worktree add ${treePath} -b ${branch}`.quiet();
+    return;
   }
+
+  if (startPoint) {
+    if (!isSafeRefName(startPoint)) {
+      throw new Error(`Unsafe start-point ref: ${startPoint}`);
+    }
+    await $`git -C ${root} worktree add ${treePath} -b ${branch} ${startPoint}`.quiet();
+    return;
+  }
+
+  await $`git -C ${root} worktree add ${treePath} -b ${branch}`.quiet();
 }
 
 async function checkBranchExists(root: string, branch: string): Promise<boolean> {
@@ -360,6 +370,21 @@ export async function refreshFromOrigin(root: string): Promise<void> {
   }
 
   consola.success(`Pulled latest from origin/${branch}`);
+}
+
+/**
+ * Fetch the default branch from origin without touching any working tree.
+ * Returns the default branch name so callers can use `origin/<branch>` as a
+ * start point. Safe to run with uncommitted changes in the main repo.
+ */
+export async function fetchFromOrigin(root: string): Promise<string> {
+  const branch = await getDefaultBranch(root);
+
+  consola.start(`Fetching origin/${branch}...`);
+  await $`git -C ${root} fetch origin ${branch}`.quiet();
+  consola.success(`Fetched origin/${branch}`);
+
+  return branch;
 }
 
 export interface WorktreeStatsOptions {

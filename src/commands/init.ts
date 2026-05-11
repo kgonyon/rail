@@ -53,7 +53,10 @@ async function createConfigFile(root: string, projectName: string): Promise<void
 name: ${projectName}
 
 worktrees:
-  # Directory where feature worktrees are created (relative to project root)
+  # Directory where feature worktrees are created.
+  # Relative paths resolve against the project root. Absolute paths
+  # and ~/... are also supported (useful in .rail/local.yaml to keep
+  # worktrees outside the repo).
   dir: trees
   # Prefix for feature branches (e.g., feature/my-feature)
   branch_prefix: feature/

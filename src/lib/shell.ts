@@ -1,8 +1,14 @@
 import { $ } from 'bun';
 
-/** Run a git command quietly in a given directory, returning stdout text. */
+/**
+ * Run a git command quietly in a given directory, returning stdout text.
+ *
+ * Passes `--no-optional-locks` so concurrent reads (e.g. parallel `rail status`
+ * workers) don't race a user's foreground git command for `index.lock`. Safe
+ * for write commands too — git ignores the flag where it doesn't apply.
+ */
 export async function gitExec(root: string, args: string): Promise<string> {
-  const result = await $`git -C ${root} ${{ raw: args }}`.quiet();
+  const result = await $`git -C ${root} --no-optional-locks ${{ raw: args }}`.quiet();
   return result.text();
 }
 

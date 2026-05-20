@@ -1,5 +1,6 @@
 import { defineCommand, runMain } from 'citty';
 import consola from 'consola';
+import { formatShellError } from './lib/shell';
 
 const main = defineCommand({
   meta: {
@@ -23,7 +24,8 @@ const originalConsoleError = console.error;
 console.error = (...args: unknown[]) => {
   const first = args[0];
   if (first instanceof Error) {
-    consola.error(first.message);
+    const shellMessage = formatShellError(first);
+    consola.error(shellMessage ?? first.message);
     return;
   }
   originalConsoleError(...args);

@@ -50,7 +50,7 @@ async function runFeatureScoped(
   extraArgs: string[],
 ): Promise<void> {
   const feature = resolveFeature(featureArg, config.worktrees.dir, cmdConfig.name);
-  const treePath = getWorktreePath(root, config.worktrees.dir, feature);
+  const treePath = getWorktreePath(config.worktrees.dir, feature);
   const ports = lookupPorts(root, feature, config);
 
   const context: ScriptContext = {

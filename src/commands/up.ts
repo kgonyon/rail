@@ -3,7 +3,7 @@ import consola from 'consola';
 import { getProjectRoot, getWorktreePath } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { allocatePorts, getPortsForFeature } from '../lib/ports';
-import { addWorktree, refreshFromOrigin } from '../lib/git';
+import { addWorktree, fetchFromOrigin } from '../lib/git';
 import { generateEnvFiles } from '../lib/env';
 import { runHooks } from '../lib/hooks';
 import { runScript } from '../lib/script';
@@ -26,11 +26,11 @@ export default defineCommand({
     const root = await getProjectRoot();
     const config = loadConfig(root);
 
-    await refreshFromOrigin(root);
+    const defaultBranch = await fetchFromOrigin(root);
 
     const index = allocatePorts(root, feature, config.port);
     const ports = getPortsForFeature(config.port, index);
-    const treePath = getWorktreePath(root, config.worktrees.dir, feature);
+    const treePath = getWorktreePath(config.worktrees.dir, feature);
 
     const context: ScriptContext = {
       root,
@@ -43,7 +43,13 @@ export default defineCommand({
 
     consola.start(`Setting up feature: ${feature}`);
 
-    await addWorktree(root, treePath, config.worktrees.branch_prefix, feature);
+    await addWorktree(
+      root,
+      treePath,
+      config.worktrees.branch_prefix,
+      feature,
+      `origin/${defaultBranch}`,
+    );
     consola.info(`Created worktree at ${treePath}`);
 
     consola.info(`Allocated ports: ${ports.join(', ')}`);

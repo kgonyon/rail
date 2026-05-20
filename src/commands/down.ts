@@ -28,7 +28,7 @@ export default defineCommand({
     const config = loadConfig(root);
 
     const feature = resolveFeature(args.feature as string | undefined, config.worktrees.dir);
-    const treePath = getWorktreePath(root, config.worktrees.dir, feature);
+    const treePath = getWorktreePath(config.worktrees.dir, feature);
 
     if (!existsSync(treePath)) {
       throw new Error(

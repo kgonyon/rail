@@ -362,8 +362,18 @@ export async function refreshFromOrigin(root: string): Promise<void> {
 
   consola.start(`Pulling origin/${branch}...`);
 
-  const result = await $`git -C ${root} pull origin ${branch}`.quiet();
-  const output = result.text().trim();
+  let output: string;
+  try {
+    output = (await gitExec(root, `pull --ff-only origin ${branch}`)).trim();
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Failed to fast-forward ${branch} from origin/${branch}. ` +
+        `Your local ${branch} likely has commits not on origin — investigate ` +
+        `and reset it to origin/${branch} before retrying.` +
+        (detail ? `\n\n${detail}` : ''),
+    );
+  }
 
   if (output) {
     consola.info(output);

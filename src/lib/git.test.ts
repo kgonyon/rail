@@ -34,6 +34,7 @@ import {
   isSafeRefName,
   getOpenPrs,
   parseGhPrListJson,
+  refreshFromOrigin,
   __resetGhAvailableCache,
 } from './git';
 
@@ -968,5 +969,111 @@ describe('getWorktreeStats', () => {
     });
 
     expect(stats.openPrs).toEqual({ state: 'error' });
+  });
+});
+
+describe('refreshFromOrigin', () => {
+  /**
+   * Build a gitExecHandler that responds to the calls refreshFromOrigin makes:
+   * 1. getDefaultBranch → origin/HEAD ref
+   * 2. getWorktreeStats → status --porcelain, diff HEAD --numstat
+   *    (rev-list is short-circuited because branch === defaultBranch)
+   * 3. the actual pull
+   *
+   * `porcelain` controls the dirty-tree check; `pullResult` controls the pull.
+   */
+  function buildHandler(opts: {
+    porcelain?: string;
+    pullResult: Promise<string>;
+  }): { handler: GitExecHandler; calls: string[] } {
+    const calls: string[] = [];
+    const handler: GitExecHandler = (_root, args) => {
+      calls.push(args);
+      if (args.includes('symbolic-ref') || args.includes('rev-parse')) {
+        return Promise.resolve('refs/remotes/origin/main\n');
+      }
+      if (args.includes('status --porcelain')) {
+        return Promise.resolve(opts.porcelain ?? '');
+      }
+      if (args.includes('diff HEAD --numstat')) {
+        return Promise.resolve('');
+      }
+      if (args.startsWith('pull')) {
+        return opts.pullResult;
+      }
+      return Promise.resolve('');
+    };
+    return { handler, calls };
+  }
+
+  it('passes --ff-only on the pull command', async () => {
+    const { handler, calls } = buildHandler({
+      pullResult: Promise.resolve('Already up to date.\n'),
+    });
+    gitExecHandler = handler;
+
+    await refreshFromOrigin('/fake/path');
+
+    const pullCall = calls.find((a) => a.startsWith('pull'));
+    expect(pullCall).toBe('pull --ff-only origin main');
+  });
+
+  it('resolves without error when already up to date', async () => {
+    const { handler } = buildHandler({
+      pullResult: Promise.resolve('Already up to date.\n'),
+    });
+    gitExecHandler = handler;
+
+    await expect(refreshFromOrigin('/fake/path')).resolves.toBeUndefined();
+  });
+
+  it('resolves on a successful fast-forward', async () => {
+    const { handler } = buildHandler({
+      pullResult: Promise.resolve(
+        'From github.com:foo/bar\n * branch main -> FETCH_HEAD\nUpdating abc..def\nFast-forward\n',
+      ),
+    });
+    gitExecHandler = handler;
+
+    await expect(refreshFromOrigin('/fake/path')).resolves.toBeUndefined();
+  });
+
+  it('throws a friendly error when fast-forward fails (divergent branches)', async () => {
+    const { handler } = buildHandler({
+      pullResult: Promise.reject(new Error('fatal: Not possible to fast-forward, aborting.')),
+    });
+    gitExecHandler = handler;
+
+    await expect(refreshFromOrigin('/fake/path')).rejects.toThrow(
+      /Failed to fast-forward main from origin\/main/,
+    );
+    await expect(refreshFromOrigin('/fake/path')).rejects.toThrow(
+      /reset it to origin\/main before retrying/,
+    );
+  });
+
+  it('throws the uncommitted-changes error before attempting to pull', async () => {
+    let pullAttempted = false;
+    gitExecHandler = (_root, args) => {
+      if (args.includes('symbolic-ref') || args.includes('rev-parse')) {
+        return Promise.resolve('refs/remotes/origin/main\n');
+      }
+      if (args.includes('status --porcelain')) {
+        return Promise.resolve(' M dirty.ts\n');
+      }
+      if (args.includes('diff HEAD --numstat')) {
+        return Promise.resolve('1\t0\tdirty.ts');
+      }
+      if (args.startsWith('pull')) {
+        pullAttempted = true;
+        return Promise.resolve('');
+      }
+      return Promise.resolve('');
+    };
+
+    await expect(refreshFromOrigin('/fake/path')).rejects.toThrow(
+      /Uncommitted changes detected/,
+    );
+    expect(pullAttempted).toBe(false);
   });
 });

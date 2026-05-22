@@ -1,0 +1,131 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout rail
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun test
+
+      - name: Build release archives
+        env:
+          RAIL_VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          version="${RAIL_VERSION#v}"
+          export RAIL_VERSION="${version}"
+          mkdir -p dist/release build
+
+          build_one() {
+            target="$1"
+            asset="$2"
+
+            mkdir -p "build/${asset}"
+            bun build --compile --minify --env=RAIL_* --target="${target}" src/cli.ts --outfile "build/${asset}/rail"
+            chmod +x "build/${asset}/rail"
+            tar -czf "dist/release/${asset}.tar.gz" -C "build/${asset}" rail
+          }
+
+          build_one bun-darwin-x64 rail_Darwin_x86_64
+          build_one bun-darwin-arm64 rail_Darwin_arm64
+          build_one bun-linux-x64 rail_Linux_x86_64
+          build_one bun-linux-arm64 rail_Linux_arm64
+
+          cd dist/release
+          sha256sum *.tar.gz > checksums.txt
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --verify-tag \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "Release ${GITHUB_REF_NAME}" \
+            dist/release/*.tar.gz \
+            dist/release/checksums.txt
+
+      - name: Checkout Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: kgonyon/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update Homebrew formula
+        working-directory: homebrew-tap
+        run: |
+          set -euo pipefail
+
+          mkdir -p Formula
+          version="${GITHUB_REF_NAME#v}"
+          checksums="../dist/release/checksums.txt"
+
+          darwin_x86_64_sha="$(awk '/rail_Darwin_x86_64.tar.gz/ {print $1}' "${checksums}")"
+          darwin_arm64_sha="$(awk '/rail_Darwin_arm64.tar.gz/ {print $1}' "${checksums}")"
+          linux_x86_64_sha="$(awk '/rail_Linux_x86_64.tar.gz/ {print $1}' "${checksums}")"
+          linux_arm64_sha="$(awk '/rail_Linux_arm64.tar.gz/ {print $1}' "${checksums}")"
+
+          cat > Formula/rail.rb <<EOF
+          class Rail < Formula
+            desc "Per-feature git worktrees with isolated ports, env files, and hooks"
+            homepage "https://github.com/kgonyon/rail"
+            version "${version}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/kgonyon/rail/releases/download/v${version}/rail_Darwin_arm64.tar.gz"
+                sha256 "${darwin_arm64_sha}"
+              else
+                url "https://github.com/kgonyon/rail/releases/download/v${version}/rail_Darwin_x86_64.tar.gz"
+                sha256 "${darwin_x86_64_sha}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/kgonyon/rail/releases/download/v${version}/rail_Linux_arm64.tar.gz"
+                sha256 "${linux_arm64_sha}"
+              else
+                url "https://github.com/kgonyon/rail/releases/download/v${version}/rail_Linux_x86_64.tar.gz"
+                sha256 "${linux_x86_64_sha}"
+              end
+            end
+
+            def install
+              bin.install "rail"
+            end
+
+            test do
+              system "#{bin}/rail", "--version"
+            end
+          end
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/rail.rb
+          git commit -m "rail ${GITHUB_REF_NAME}" || exit 0
+          git push

@@ -69,6 +69,10 @@ export function getUserConfigPath(): string {
   return join(homedir(), '.config', 'rail', 'config.yaml');
 }
 
+export function getUpdateCheckCachePath(): string {
+  return join(homedir(), '.rail', 'update_check.json');
+}
+
 export function isRailProject(root: string): boolean {
   return existsSync(join(root, '.rail', 'config.yaml'));
 }

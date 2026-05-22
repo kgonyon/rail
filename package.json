@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun run src/cli.ts",
-    "build": "trap 'rm -f ./*.bun-build ./.?*.bun-build' EXIT; rm -f ./*.bun-build ./.?*.bun-build; bun build --compile --minify src/cli.ts --outfile dist/rail",
+    "build": "trap 'rm -f ./*.bun-build ./.?*.bun-build' EXIT; rm -f ./*.bun-build ./.?*.bun-build; bun build --compile --minify --env=RAIL_* src/cli.ts --outfile dist/rail",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "install:local": "bun run build && ln -sf $(pwd)/dist/rail ~/.bun/bin/rail"

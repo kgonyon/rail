@@ -9,10 +9,24 @@ your project's setup and cleanup scripts on the way in and out.
 
 ## Install
 
+### Homebrew
+
+```sh
+brew install kgonyon/tap/rail
+```
+
+Upgrade to the latest stable release:
+
+```sh
+rail upgrade
+```
+
+### From source
+
 Requires [Bun](https://bun.sh).
 
 ```sh
-git clone https://github.com/robrichardson13/rail
+git clone https://github.com/kgonyon/rail
 cd rail
 bun install
 bun run install:local   # builds dist/rail and symlinks it into ~/.bun/bin/rail
@@ -63,8 +77,14 @@ run with `RAIL_PROJECT`, `RAIL_FEATURE`, `RAIL_FEATURE_DIR`, and
 - `rail status` — Show all active feature worktrees with branch, port, and dirty state
 - `rail run <name>` — Run a configured command
 - `rail refresh` — Pull latest changes from the default branch
+- `rail upgrade` — Upgrade Homebrew installs or replace a manual binary with the latest release
+- `rail -v`, `rail --version` — Print the current rail version
 
 Run any command with `--help` for its flags.
+
+## Releases
+
+Pushing a stable tag like `v1.2.3` builds macOS/Linux release binaries, creates a GitHub release, and updates `kgonyon/homebrew-tap`. The release workflow needs a `HOMEBREW_TAP_GITHUB_TOKEN` secret with write access to that tap repo.
 
 ## Further reading
 

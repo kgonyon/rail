@@ -5,6 +5,7 @@ import { loadConfig } from '../lib/config';
 import { allocatePorts, getPortsForFeature } from '../lib/ports';
 import { addWorktree, fetchFromOrigin } from '../lib/git';
 import { generateEnvFiles } from '../lib/env';
+import { copyRailDirIfMissing } from '../lib/rail-dir';
 import { runHooks } from '../lib/hooks';
 import { runScript } from '../lib/script';
 import type { ScriptContext } from '../lib/script';
@@ -51,6 +52,10 @@ export default defineCommand({
       `origin/${defaultBranch}`,
     );
     consola.info(`Created worktree at ${treePath}`);
+
+    if (copyRailDirIfMissing(root, treePath)) {
+      consola.info('Copied .rail into worktree');
+    }
 
     consola.info(`Allocated ports: ${ports.join(', ')}`);
 

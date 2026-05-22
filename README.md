@@ -49,7 +49,9 @@ and `rail run <name>` work without arguments.
 
 **Worktrees.** One worktree per feature, created at `<root>/trees/<feature>`
 on branch `feature/<feature>`. The directory and branch prefix are
-configurable in `.rail/config.yaml`.
+configurable in `.rail/config.yaml`. If `.rail/` is not tracked by git, `rail up`
+copies it into the new worktree so feature-scoped commands can still resolve
+scripts from `<worktree>/.rail`.
 
 **Port slots.** Each feature is assigned a slot index, not a fixed port.
 Actual ports are derived as `base + index * per_feature`, so changing

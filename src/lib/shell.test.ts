@@ -61,7 +61,7 @@ describe('gitExec', () => {
   test('forwards git stderr when a command fails', async () => {
     const root = mkdtempSync(join(tmpdir(), 'rail-shell-'));
     try {
-      await expect(gitExec(root, 'status')).rejects.toThrow(/not a git repository/);
+      await expect(gitExec(root, 'definitely-not-a-git-command')).rejects.toThrow(/is not a git command/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

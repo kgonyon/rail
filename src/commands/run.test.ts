@@ -5,6 +5,11 @@ import type { RailConfig } from '../types/config';
 function makeConfig(commands?: RailConfig['commands']): RailConfig {
   const config: RailConfig = {
     name: 'test-project',
+    vcs: 'git',
+    forge: 'github',
+    default_parent: 'main',
+    auto_refresh: true,
+    setup: { track_rail: true, ignore_destination: 'gitignore' },
     worktrees: { dir: '.trees', branch_prefix: 'feature/' },
     port: { base: 3000, per_feature: 10, max: 100 },
   };

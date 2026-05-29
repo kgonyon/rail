@@ -35,6 +35,7 @@ import {
   getOpenPrs,
   parseGhPrListJson,
   refreshFromOrigin,
+  fetchFromOrigin,
   __resetGhAvailableCache,
 } from './git';
 
@@ -974,11 +975,8 @@ describe('getWorktreeStats', () => {
 
 describe('refreshFromOrigin', () => {
   /**
-   * Build a gitExecHandler that responds to the calls refreshFromOrigin makes:
-   * 1. getDefaultBranch → origin/HEAD ref
-   * 2. getWorktreeStats → status --porcelain, diff HEAD --numstat
-   *    (rev-list is short-circuited because branch === defaultBranch)
-   * 3. the actual pull
+   * Build a gitExecHandler that responds to the calls refreshFromOrigin makes
+   * for a checked-out local branch with upstream configuration.
    *
    * `porcelain` controls the dirty-tree check; `pullResult` controls the pull.
    */
@@ -989,16 +987,21 @@ describe('refreshFromOrigin', () => {
     const calls: string[] = [];
     const handler: GitExecHandler = (_root, args) => {
       calls.push(args);
-      if (args.includes('symbolic-ref') || args.includes('rev-parse')) {
+      if (args.includes('symbolic-ref')) {
         return Promise.resolve('refs/remotes/origin/main\n');
       }
+      if (args === 'rev-parse --verify refs/heads/main') return Promise.resolve('main\n');
+      if (args === 'rev-parse --abbrev-ref main@{upstream}') {
+        return Promise.resolve('origin/main\n');
+      }
+      if (args === 'branch --show-current') return Promise.resolve('main\n');
       if (args.includes('status --porcelain')) {
         return Promise.resolve(opts.porcelain ?? '');
       }
       if (args.includes('diff HEAD --numstat')) {
         return Promise.resolve('');
       }
-      if (args.startsWith('pull')) {
+      if (args === 'pull --ff-only') {
         return opts.pullResult;
       }
       return Promise.resolve('');
@@ -1015,7 +1018,72 @@ describe('refreshFromOrigin', () => {
     await refreshFromOrigin('/fake/path');
 
     const pullCall = calls.find((a) => a.startsWith('pull'));
-    expect(pullCall).toBe('pull --ff-only origin main');
+    expect(pullCall).toBe('pull --ff-only');
+  });
+
+  it('fetches remote-shaped targets without pulling or checking the worktree', async () => {
+    const calls: string[] = [];
+    gitExecHandler = (_root, args) => {
+      calls.push(args);
+      if (args === 'rev-parse --verify refs/heads/origin/main') {
+        return Promise.reject(new Error('not a local branch'));
+      }
+      if (args === 'fetch origin main') return Promise.resolve('');
+      return Promise.resolve('');
+    };
+
+    await expect(refreshFromOrigin('/fake/path', 'origin/main')).resolves.toBeUndefined();
+
+    expect(calls).toEqual([
+      'rev-parse --verify refs/heads/origin/main',
+      'fetch origin main',
+    ]);
+  });
+
+  it('fast-forwards non-current local branches from their upstream', async () => {
+    const calls: string[] = [];
+    gitExecHandler = (_root, args) => {
+      calls.push(args);
+      if (args === 'rev-parse --verify refs/heads/release') return Promise.resolve('release\n');
+      if (args === 'rev-parse --abbrev-ref release@{upstream}') {
+        return Promise.resolve('origin/release\n');
+      }
+      if (args === 'branch --show-current') return Promise.resolve('main\n');
+      if (args === 'fetch origin release') return Promise.resolve('');
+      if (args === 'merge-base --is-ancestor release origin/release') return Promise.resolve('');
+      if (args === 'branch -f release origin/release') return Promise.resolve('');
+      return Promise.resolve('');
+    };
+
+    await expect(refreshFromOrigin('/fake/path', 'release')).resolves.toBeUndefined();
+
+    expect(calls).toEqual([
+      'rev-parse --verify refs/heads/release',
+      'rev-parse --abbrev-ref release@{upstream}',
+      'branch --show-current',
+      'fetch origin release',
+      'merge-base --is-ancestor release origin/release',
+      'branch -f release origin/release',
+    ]);
+  });
+
+  it('does not require remote sync for local branches without upstream', async () => {
+    const calls: string[] = [];
+    gitExecHandler = (_root, args) => {
+      calls.push(args);
+      if (args === 'rev-parse --verify refs/heads/local-only') return Promise.resolve('local-only\n');
+      if (args === 'rev-parse --abbrev-ref local-only@{upstream}') {
+        return Promise.reject(new Error('no upstream'));
+      }
+      return Promise.resolve('');
+    };
+
+    await expect(refreshFromOrigin('/fake/path', 'local-only')).resolves.toBeUndefined();
+
+    expect(calls).toEqual([
+      'rev-parse --verify refs/heads/local-only',
+      'rev-parse --abbrev-ref local-only@{upstream}',
+    ]);
   });
 
   it('resolves without error when already up to date', async () => {
@@ -1045,10 +1113,10 @@ describe('refreshFromOrigin', () => {
     gitExecHandler = handler;
 
     await expect(refreshFromOrigin('/fake/path')).rejects.toThrow(
-      /Failed to fast-forward main from origin\/main/,
+      /Failed to fast-forward main from its upstream/,
     );
     await expect(refreshFromOrigin('/fake/path')).rejects.toThrow(
-      /reset it to origin\/main before retrying/,
+      /retry when Git can fast-forward it/,
     );
   });
 
@@ -1056,8 +1124,11 @@ describe('refreshFromOrigin', () => {
     let pullAttempted = false;
     gitExecHandler = (_root, args) => {
       if (args.includes('symbolic-ref') || args.includes('rev-parse')) {
+        if (args === 'rev-parse --verify refs/heads/main') return Promise.resolve('main\n');
+        if (args === 'rev-parse --abbrev-ref main@{upstream}') return Promise.resolve('origin/main\n');
         return Promise.resolve('refs/remotes/origin/main\n');
       }
+      if (args === 'branch --show-current') return Promise.resolve('main\n');
       if (args.includes('status --porcelain')) {
         return Promise.resolve(' M dirty.ts\n');
       }
@@ -1075,5 +1146,18 @@ describe('refreshFromOrigin', () => {
       /Uncommitted changes detected/,
     );
     expect(pullAttempted).toBe(false);
+  });
+});
+
+describe('fetchFromOrigin', () => {
+  it('validates and returns the parent without remote sync', async () => {
+    let called = false;
+    gitExecHandler = () => {
+      called = true;
+      return Promise.resolve('');
+    };
+
+    await expect(fetchFromOrigin('/fake/path', 'origin/main')).resolves.toBe('origin/main');
+    expect(called).toBe(false);
   });
 });

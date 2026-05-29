@@ -1,0 +1,10 @@
+# Trellis project configuration.
+# See https://github.com/kgonyon/trellis for documentation.
+
+journal:
+  provider: sqlite
+
+logging:
+  redact_substrings: []
+  stderr_mirror: true
+  truncate_bytes: 8192

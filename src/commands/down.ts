@@ -1,10 +1,10 @@
 import { existsSync } from 'fs';
 import { defineCommand } from 'citty';
 import consola from 'consola';
-import { getProjectRoot, getWorktreePath } from '../lib/paths';
+import { getWorktreePath } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { loadPortAllocations, getPortsForFeature, deallocatePorts } from '../lib/ports';
-import { removeWorktree } from '../lib/git';
+import { getVcsDriver, gitVcsDriver } from '../lib/vcs';
 import { resolveFeature } from '../lib/detect';
 import { runHooks } from '../lib/hooks';
 import { runScript } from '../lib/script';
@@ -22,10 +22,15 @@ export default defineCommand({
       description: 'Feature name (auto-detected if inside a worktree)',
       required: false,
     },
+    prune: {
+      type: 'boolean',
+      description: 'Delete the feature branch or bookmark after removing the worktree',
+    },
   },
   async run({ args }) {
-    const root = await getProjectRoot();
+    const root = await gitVcsDriver.resolveProjectRoot();
     const config = loadConfig(root);
+    const vcsDriver = getVcsDriver(config.vcs);
 
     const feature = resolveFeature(args.feature as string | undefined, config.worktrees.dir);
     const treePath = getWorktreePath(config.worktrees.dir, feature);
@@ -56,11 +61,16 @@ export default defineCommand({
       await runScript(config.scripts.cleanup, context);
     }
 
-    await removeWorktree(root, treePath);
+    await vcsDriver.removeFeature(root, treePath, feature);
     consola.info('Removed worktree');
 
     deallocatePorts(root, feature);
     consola.info('Deallocated ports');
+
+    if (args.prune) {
+      await vcsDriver.pruneFeature(root, config.worktrees.branch_prefix ?? '', feature);
+      consola.info('Pruned feature ref');
+    }
 
     consola.success(`Feature "${feature}" has been removed`);
   },

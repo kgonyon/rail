@@ -32,7 +32,7 @@ Commands resolve the project root with `getProjectRoot()` (in `src/lib/paths.ts`
 
 ### Worktrees
 
-Feature worktrees live at `<root>/<config.worktrees.dir>/<feature>` on branch `<config.worktrees.branch_prefix><feature>`. `rail up` creates them via `git worktree add`, reusing an existing branch if it already exists. `rail down` removes via `git worktree remove --force`. `resolveFeature()` in `src/lib/detect.ts` auto-detects the feature name from `process.cwd()` when the user omits it — it looks for `/<treesDir>/<feature>/` in the path.
+Feature worktrees live at `<root>/<config.worktrees.dir>/<normalized-feature>` on branch `<config.worktrees.branch_prefix><feature>`; omitted `branch_prefix` means no prefix. Slash-separated feature names are normalized for directories by replacing `/` with `+` (for example `feature/blah` → `feature+blah`) while retaining the raw branch/bookmark name. `rail up` creates them via `git worktree add`, reusing an existing branch if it already exists. `rail down` removes via `git worktree remove --force`; `rail down --prune` also deletes the branch/bookmark. `resolveFeature()` in `src/lib/detect.ts` auto-detects the feature name from `process.cwd()` when the user omits it — it reverses the normalized directory segment after `/<treesDir>/`.
 
 ### Port allocation
 

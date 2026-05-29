@@ -1,10 +1,16 @@
 import { describe, it, expect } from 'bun:test';
-import { findCommand, extractExtraArgs, shellEscape } from './run';
+import { join } from 'path';
+import { findCommand, extractExtraArgs, shellEscape, resolveCommandPath } from './run';
 import type { RailConfig } from '../types/config';
 
 function makeConfig(commands?: RailConfig['commands']): RailConfig {
   const config: RailConfig = {
     name: 'test-project',
+    vcs: 'git',
+    forge: 'github',
+    default_parent: 'main',
+    auto_refresh: true,
+    setup: { track_rail: true, ignore_destination: 'gitignore' },
     worktrees: { dir: '.trees', branch_prefix: 'feature/' },
     port: { base: 3000, per_feature: 10, max: 100 },
   };
@@ -97,5 +103,17 @@ describe('shellEscape', () => {
 
   it('returns empty string for empty array', () => {
     expect(shellEscape([])).toBe('');
+  });
+});
+
+describe('resolveCommandPath', () => {
+  it('resolves feature-scoped relative commands against the root .rail directory', () => {
+    expect(resolveCommandPath('scripts/dev.sh', '/projects/app')).toBe(
+      join('/projects/app', '.rail', 'scripts/dev.sh'),
+    );
+  });
+
+  it('leaves shell commands unchanged', () => {
+    expect(resolveCommandPath('npm run dev', '/projects/app')).toBe('npm run dev');
   });
 });

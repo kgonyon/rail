@@ -1,11 +1,15 @@
 import { describe, it, expect } from 'bun:test';
 import {
+  collectStats,
   filterFeatureWorktrees,
   formatStats,
   linkify,
+  getFeatureDisplayName,
+  getFeatureRefDisplay,
   shouldEmitHyperlinks,
 } from './status';
 import type { WorktreeInfo, WorktreeStats } from '../lib/git';
+import type { VcsDriver } from '../lib/vcs';
 
 describe('filterFeatureWorktrees', () => {
   const worktrees: WorktreeInfo[] = [
@@ -75,6 +79,12 @@ describe('formatStats', () => {
 
   it('returns ["clean"] when all categories are zero', () => {
     expect(formatStats(makeStats(), 'main', { hyperlinks: false })).toEqual(['clean']);
+  });
+
+  it('renders simple JJ clean, changed, and unknown states', () => {
+    expect(formatStats(makeStats({ localState: 'clean' }), 'main', { hyperlinks: false })).toEqual(['clean']);
+    expect(formatStats(makeStats({ localState: 'changed', isDirty: true }), 'main', { hyperlinks: false })).toEqual(['changed']);
+    expect(formatStats(makeStats({ localState: 'unknown' }), 'main', { hyperlinks: false })).toEqual(['unknown']);
   });
 
   it('formats only-staged changes without insertions/deletions block', () => {
@@ -201,6 +211,21 @@ describe('formatStats', () => {
     expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['? open PRs']);
   });
 
+  it('renders open reviews with MR labels when provided by the forge driver', () => {
+    const stats = makeStats({
+      openPrs: {
+        state: 'ok',
+        prs: [{ number: 123, url: 'https://gitlab.com/owner/repo/-/merge_requests/123' }],
+      },
+    });
+
+    expect(formatStats(stats, 'main', {
+      hyperlinks: false,
+      reviewLabel: 'MR',
+      reviewLabelPlural: 'MRs',
+    })).toEqual(['1 open MR: https://gitlab.com/owner/repo/-/merge_requests/123']);
+  });
+
   it('omits PR lines when openPrs state is unavailable', () => {
     const stats = makeStats({ openPrs: { state: 'unavailable' } });
     expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['clean']);
@@ -288,6 +313,92 @@ describe('formatStats', () => {
       `  #123 ${url1}`,
       `  #456 ${url2}`,
     ]);
+  });
+});
+
+describe('feature display helpers', () => {
+  it('uses JJ feature and bookmark labels when present', () => {
+    const feature: WorktreeInfo = {
+      path: '/repo/.trees/demo',
+      head: 'feature/demo',
+      branch: 'feature/demo',
+      feature: 'demo',
+      displayLabel: 'feature/demo',
+      refLabel: 'Bookmark',
+    };
+
+    expect(getFeatureDisplayName(feature)).toBe('demo');
+    expect(getFeatureRefDisplay(feature)).toEqual({ label: 'Bookmark', value: 'feature/demo' });
+  });
+
+  it('falls back to Git branch labels from the path and branch', () => {
+    const feature: WorktreeInfo = {
+      path: '/repo/.trees/demo',
+      head: 'abc',
+      branch: 'refs/heads/feature/demo',
+    };
+
+    expect(getFeatureDisplayName(feature)).toBe('demo');
+    expect(getFeatureRefDisplay(feature)).toEqual({ label: 'Branch', value: 'feature/demo' });
+  });
+
+  it('decodes normalized slash-separated feature directory names for display', () => {
+    const feature: WorktreeInfo = {
+      path: '/repo/.trees/feature+demo',
+      head: 'abc',
+      branch: 'refs/heads/feature/demo',
+    };
+
+    expect(getFeatureDisplayName(feature)).toBe('feature/demo');
+  });
+});
+
+describe('collectStats', () => {
+  it('hands the JJ bookmark name to the forge lookup', async () => {
+    const reviewCalls: Array<{ path: string; head: string }> = [];
+    const statusCalls: Array<{ path: string; branch: string | undefined }> = [];
+    const stats: WorktreeStats = {
+      fileCount: 0,
+      stagedFiles: 0,
+      unstagedFiles: 0,
+      untrackedFiles: 0,
+      insertions: 0,
+      deletions: 0,
+      isDirty: false,
+      commitsAhead: 0,
+      openPrs: { state: 'unavailable' },
+      localState: 'clean',
+    };
+    const driver = {
+      getLocalFeatureStatus(path: string, options: { branch?: string }) {
+        statusCalls.push({ path, branch: options.branch });
+        return Promise.resolve(stats);
+      },
+    } as VcsDriver;
+
+    await collectStats([
+      {
+        path: '/repo/.trees/demo',
+        head: 'feature/demo',
+        branch: 'feature/demo',
+        refLabel: 'Bookmark',
+      },
+    ], {
+      defaultBranch: 'main@origin',
+      vcsDriver: driver,
+      forgeAvailable: true,
+      forgeDriver: {
+        reviewLabel: 'PR',
+        reviewLabelPlural: 'PRs',
+        getOpenReviews(path: string, head: string) {
+          reviewCalls.push({ path, head });
+          return Promise.resolve({ state: 'ok' as const, reviews: [] });
+        },
+      },
+    });
+
+    expect(statusCalls).toEqual([{ path: '/repo/.trees/demo', branch: 'feature/demo' }]);
+    expect(reviewCalls).toEqual([{ path: '/repo/.trees/demo', head: 'feature/demo' }]);
   });
 });
 

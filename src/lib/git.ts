@@ -1,11 +1,20 @@
 import { $ } from 'bun';
 import consola from 'consola';
-import { ghExec, gitExec } from './shell';
+import { gitExec, throwFormattedShellError } from './shell';
+export {
+  __resetGhAvailableCache,
+  isGhAvailable,
+  parseGhPrListJson,
+} from './forge';
+import { listOpenGitHubReviews } from './forge';
 
 export interface WorktreeInfo {
   path: string;
   head: string;
   branch: string;
+  feature?: string;
+  displayLabel?: string;
+  refLabel?: 'Branch' | 'Bookmark';
 }
 
 export interface OpenPrInfo {
@@ -28,6 +37,7 @@ export interface WorktreeStats {
   isDirty: boolean;
   commitsAhead: number;
   openPrs: OpenPrsResult;
+  localState?: 'clean' | 'changed' | 'unknown';
 }
 
 export async function addWorktree(
@@ -41,7 +51,11 @@ export async function addWorktree(
   const branchExists = await checkBranchExists(root, branch);
 
   if (branchExists) {
-    await $`git -C ${root} worktree add ${treePath} ${branch}`.quiet();
+    try {
+      await $`git -C ${root} worktree add ${treePath} ${branch}`.quiet();
+    } catch (err) {
+      throwFormattedShellError(err);
+    }
     return;
   }
 
@@ -49,16 +63,24 @@ export async function addWorktree(
     if (!isSafeRefName(startPoint)) {
       throw new Error(`Unsafe start-point ref: ${startPoint}`);
     }
-    await $`git -C ${root} worktree add ${treePath} -b ${branch} ${startPoint}`.quiet();
+    try {
+      await $`git -C ${root} worktree add ${treePath} -b ${branch} ${startPoint}`.quiet();
+    } catch (err) {
+      throwFormattedShellError(err);
+    }
     return;
   }
 
-  await $`git -C ${root} worktree add ${treePath} -b ${branch}`.quiet();
+  try {
+    await $`git -C ${root} worktree add ${treePath} -b ${branch}`.quiet();
+  } catch (err) {
+    throwFormattedShellError(err);
+  }
 }
 
 async function checkBranchExists(root: string, branch: string): Promise<boolean> {
   try {
-    await $`git -C ${root} rev-parse --verify ${branch}`.quiet();
+    await gitExec(root, `rev-parse --verify refs/heads/${branch}`);
     return true;
   } catch {
     return false;
@@ -66,12 +88,28 @@ async function checkBranchExists(root: string, branch: string): Promise<boolean>
 }
 
 export async function removeWorktree(root: string, treePath: string): Promise<void> {
-  await $`git -C ${root} worktree remove ${treePath} --force`.quiet();
+  try {
+    await $`git -C ${root} worktree remove ${treePath} --force`.quiet();
+  } catch (err) {
+    throwFormattedShellError(err);
+  }
+}
+
+export async function deleteBranch(root: string, branch: string): Promise<void> {
+  if (!isSafeRefName(branch)) {
+    throw new Error(`Unsafe branch ref: ${branch}`);
+  }
+
+  await gitExec(root, `branch -D -- ${branch}`);
 }
 
 export async function listWorktrees(root: string): Promise<WorktreeInfo[]> {
-  const result = await $`git -C ${root} worktree list --porcelain`.quiet();
-  return parsePorcelainOutput(result.text());
+  try {
+    const result = await $`git -C ${root} worktree list --porcelain`.quiet();
+    return parsePorcelainOutput(result.text());
+  } catch (err) {
+    throwFormattedShellError(err);
+  }
 }
 
 /** @internal */
@@ -223,110 +261,18 @@ const CLEAN_STATS: WorktreeStats = {
 
 const DEFAULT_BRANCH_FALLBACK = 'main';
 const ORIGIN_HEAD_PREFIX = 'refs/remotes/origin/';
-
-let ghAvailableCache: boolean | null = null;
-
 /**
- * Probe `gh auth status` once per process to determine if `gh` is installed and
- * authenticated. Subsequent calls return the cached boolean.
- */
-export async function isGhAvailable(): Promise<boolean> {
-  if (ghAvailableCache !== null) return ghAvailableCache;
-  try {
-    await ghExec(process.cwd(), 'auth status');
-    ghAvailableCache = true;
-  } catch {
-    ghAvailableCache = false;
-  }
-  return ghAvailableCache;
-}
-
-/** Reset the cached `gh` availability — for tests only. */
-export function __resetGhAvailableCache(): void {
-  ghAvailableCache = null;
-}
-
-const MAX_OPEN_PRS = 50;
-
-/**
- * Parse JSON output from `gh pr list --json number,url`.
- * Returns an array of `OpenPrInfo` for valid entries; returns `null` on
- * parse-level failure or non-array result. Malformed individual entries
- * (missing fields, bad types, non-positive numbers, unsafe URLs) are dropped.
- * Caps the result at `MAX_OPEN_PRS` valid entries; any beyond that are
- * silently dropped to keep terminal output bounded.
- */
-export function parseGhPrListJson(output: string): OpenPrInfo[] | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(output);
-  } catch {
-    return null;
-  }
-  if (!Array.isArray(parsed)) return null;
-  const prs: OpenPrInfo[] = [];
-  for (const entry of parsed) {
-    const info = toOpenPrInfo(entry);
-    if (info !== null) prs.push(info);
-  }
-  return prs.slice(0, MAX_OPEN_PRS);
-}
-
-const URL_MAX_LENGTH = 2048;
-const URL_PREFIX = 'https://';
-
-/**
- * Defense-in-depth: validate a PR URL parsed from `gh` JSON before letting it
- * flow to terminal output. Rejects non-https schemes, control characters
- * (ANSI escapes, CR/LF, BS, DEL), and oversized strings.
- */
-function isSafePrUrl(url: string): boolean {
-  if (url.length === 0 || url.length > URL_MAX_LENGTH) return false;
-  if (!url.startsWith(URL_PREFIX)) return false;
-  for (let i = 0; i < url.length; i++) {
-    const code = url.charCodeAt(i);
-    if (code < 0x20 || code === 0x7f) return false;
-  }
-  return true;
-}
-
-function toOpenPrInfo(entry: unknown): OpenPrInfo | null {
-  if (typeof entry !== 'object' || entry === null) return null;
-  const record = entry as Record<string, unknown>;
-  const num = record.number;
-  const url = record.url;
-  if (typeof num !== 'number' || !Number.isInteger(num) || num <= 0) return null;
-  if (typeof url !== 'string' || !isSafePrUrl(url)) return null;
-  return { number: num, url };
-}
-
-const REFS_HEADS_PREFIX = 'refs/heads/';
-
-/**
- * List open PRs whose HEAD is `branch` via `gh pr list --json number,url`.
- * Strips a leading `refs/heads/` from `branch` before invoking gh.
- * Returns `{ state: 'error' }` on subprocess failure, parse failure, or
- * unsafe ref name; `{ state: 'ok', prs }` otherwise.
+ * Compatibility wrapper for GitHub PR lookup. New status code goes through the
+ * forge driver, but Git status tests and older internals still exercise this
+ * bounded parser path directly.
  */
 export async function getOpenPrs(
   treePath: string,
   branch: string,
 ): Promise<OpenPrsResult> {
-  const normalized = branch.startsWith(REFS_HEADS_PREFIX)
-    ? branch.slice(REFS_HEADS_PREFIX.length)
-    : branch;
-  if (!isSafeRefName(normalized)) return { state: 'error' };
-  try {
-    const out = await ghExec(
-      treePath,
-      `pr list --head ${normalized} --state open --json number,url`,
-    );
-    const prs = parseGhPrListJson(out);
-    if (prs === null) return { state: 'error' };
-    return { state: 'ok', prs };
-  } catch {
-    return { state: 'error' };
-  }
+  const result = await listOpenGitHubReviews(treePath, branch);
+  if (result.state !== 'ok') return result;
+  return { state: 'ok', prs: result.reviews };
 }
 
 /**
@@ -347,12 +293,69 @@ export async function getDefaultBranch(root: string): Promise<string> {
   }
 }
 
-export async function refreshFromOrigin(root: string): Promise<void> {
-  const branch = await getDefaultBranch(root);
+export async function refreshFromOrigin(root: string, parentRef?: string): Promise<void> {
+  const branch = parentRef ?? await getDefaultBranch(root);
+  if (!isSafeRefName(branch)) {
+    throw new Error(`Unsafe parent ref: ${branch}`);
+  }
+
+  if (await checkBranchExists(root, branch)) {
+    await refreshLocalBranch(root, branch);
+    return;
+  }
+
+  const remote = parseRemoteRef(branch);
+  if (remote) {
+    await fetchRemoteRef(root, remote.remote, remote.ref);
+    return;
+  }
+
+  throw new Error(`Parent ref "${branch}" is not a local branch or remote-shaped ref.`);
+}
+
+async function refreshLocalBranch(root: string, branch: string): Promise<void> {
+  const upstream = await getUpstreamBranch(root, branch);
+  if (!upstream) {
+    consola.info(`Local branch ${branch} has no upstream; skipping remote sync.`);
+    return;
+  }
+
+  const currentBranch = await getCurrentBranch(root);
+  if (currentBranch === branch) {
+    await pullCurrentBranch(root, branch);
+    return;
+  }
+
+  await fastForwardBranch(root, branch, upstream);
+}
+
+async function getUpstreamBranch(root: string, branch: string): Promise<string | null> {
+  try {
+    const output = await gitExec(root, `rev-parse --abbrev-ref ${branch}@{upstream}`);
+    const upstream = output.trim();
+    if (!isSafeRefName(upstream)) {
+      throw new Error(`Unsafe upstream ref for ${branch}: ${upstream}`);
+    }
+    return upstream;
+  } catch {
+    return null;
+  }
+}
+
+async function getCurrentBranch(root: string): Promise<string | null> {
+  try {
+    const output = await gitExec(root, 'branch --show-current');
+    const branch = output.trim();
+    return branch && isSafeRefName(branch) ? branch : null;
+  } catch {
+    return null;
+  }
+}
+
+async function pullCurrentBranch(root: string, branch: string): Promise<void> {
   const { isDirty } = await getWorktreeStats(root, {
     defaultBranch: branch,
     branch,
-    ghAvailable: false,
   });
   if (isDirty) {
     throw new Error(
@@ -360,17 +363,16 @@ export async function refreshFromOrigin(root: string): Promise<void> {
     );
   }
 
-  consola.start(`Pulling origin/${branch}...`);
+  consola.start(`Pulling ${branch}...`);
 
   let output: string;
   try {
-    output = (await gitExec(root, `pull --ff-only origin ${branch}`)).trim();
+    output = (await gitExec(root, 'pull --ff-only')).trim();
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `Failed to fast-forward ${branch} from origin/${branch}. ` +
-        `Your local ${branch} likely has commits not on origin — investigate ` +
-        `and reset it to origin/${branch} before retrying.` +
+      `Failed to fast-forward ${branch} from its upstream. ` +
+        `Investigate the branch and retry when Git can fast-forward it.` +
         (detail ? `\n\n${detail}` : ''),
     );
   }
@@ -379,28 +381,71 @@ export async function refreshFromOrigin(root: string): Promise<void> {
     consola.info(output);
   }
 
-  consola.success(`Pulled latest from origin/${branch}`);
+  consola.success(`Pulled latest for ${branch}`);
+}
+
+async function fastForwardBranch(root: string, branch: string, upstream: string): Promise<void> {
+  consola.start(`Fast-forwarding ${branch} from ${upstream}...`);
+  try {
+    await gitExec(root, `fetch ${upstreamRemote(upstream)} ${upstreamBranch(upstream)}`);
+    await gitExec(root, `merge-base --is-ancestor ${branch} ${upstream}`);
+    await gitExec(root, `branch -f ${branch} ${upstream}`);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Failed to fast-forward ${branch} from ${upstream}. ` +
+        `Investigate the branch and retry when Git can fast-forward it.` +
+        (detail ? `\n\n${detail}` : ''),
+    );
+  }
+
+  consola.success(`Fast-forwarded ${branch} from ${upstream}`);
+}
+
+function upstreamRemote(upstream: string): string {
+  return upstream.split('/')[0] ?? 'origin';
+}
+
+function upstreamBranch(upstream: string): string {
+  return upstream.split('/').slice(1).join('/');
 }
 
 /**
- * Fetch the default branch from origin without touching any working tree.
- * Returns the default branch name so callers can use `origin/<branch>` as a
- * start point. Safe to run with uncommitted changes in the main repo.
+ * Fetch the parent ref from origin without touching any working tree.
+ * Returns the parent ref so callers can create features from the configured
+ * parent. Safe to run with uncommitted changes in the main repo.
  */
-export async function fetchFromOrigin(root: string): Promise<string> {
-  const branch = await getDefaultBranch(root);
-
-  consola.start(`Fetching origin/${branch}...`);
-  await $`git -C ${root} fetch origin ${branch}`.quiet();
-  consola.success(`Fetched origin/${branch}`);
+export async function fetchFromOrigin(root: string, parentRef?: string): Promise<string> {
+  const branch = parentRef ?? await getDefaultBranch(root);
+  if (!isSafeRefName(branch)) {
+    throw new Error(`Unsafe parent ref: ${branch}`);
+  }
 
   return branch;
+}
+
+function parseRemoteRef(ref: string): { remote: string; ref: string } | null {
+  const slashIndex = ref.indexOf('/');
+  if (slashIndex <= 0 || slashIndex === ref.length - 1) return null;
+  return {
+    remote: ref.slice(0, slashIndex),
+    ref: ref.slice(slashIndex + 1),
+  };
+}
+
+async function fetchRemoteRef(root: string, remote: string, ref: string): Promise<void> {
+  if (!isSafeRefName(remote) || !isSafeRefName(ref)) {
+    throw new Error(`Unsafe remote parent ref: ${remote}/${ref}`);
+  }
+
+  consola.start(`Fetching ${remote}/${ref}...`);
+  await gitExec(root, `fetch ${remote} ${ref}`);
+  consola.success(`Fetched ${remote}/${ref}`);
 }
 
 export interface WorktreeStatsOptions {
   defaultBranch: string;
   branch: string;
-  ghAvailable: boolean;
 }
 
 const COMMITS_AHEAD_FAILURE = -1;
@@ -413,16 +458,13 @@ export async function getWorktreeStats(
   try {
     porcelainOutput = await gitExec(treePath, 'status --porcelain');
   } catch {
-    const openPrs: OpenPrsResult = options.ghAvailable
-      ? { state: 'ok', prs: [] }
-      : { state: 'unavailable' };
-    return { ...CLEAN_STATS, openPrs };
+    return { ...CLEAN_STATS, openPrs: { state: 'unavailable' } };
   }
 
   const breakdown = parsePorcelainStatusBreakdown(porcelainOutput);
   const isDirty = breakdown.total > 0;
   const commitsAhead = await fetchCommitsAhead(treePath, options);
-  const openPrs = await fetchOpenPrs(treePath, options);
+  const openPrs: OpenPrsResult = { state: 'unavailable' };
 
   if (!isDirty) {
     return { ...CLEAN_STATS, commitsAhead, openPrs };
@@ -440,14 +482,6 @@ export async function getWorktreeStats(
     commitsAhead,
     openPrs,
   };
-}
-
-async function fetchOpenPrs(
-  treePath: string,
-  options: WorktreeStatsOptions,
-): Promise<OpenPrsResult> {
-  if (!options.ghAvailable) return { state: 'unavailable' };
-  return getOpenPrs(treePath, options.branch);
 }
 
 async function fetchCommitsAhead(

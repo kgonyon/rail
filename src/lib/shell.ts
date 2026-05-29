@@ -8,8 +8,12 @@ import { $ } from 'bun';
  * for write commands too — git ignores the flag where it doesn't apply.
  */
 export async function gitExec(root: string, args: string): Promise<string> {
-  const result = await $`git -C ${root} --no-optional-locks ${{ raw: args }}`.quiet();
-  return result.text();
+  try {
+    const result = await $`git -C ${root} --no-optional-locks ${{ raw: args }}`.quiet();
+    return result.text();
+  } catch (err) {
+    throwFormattedShellError(err);
+  }
 }
 
 /**
@@ -17,8 +21,36 @@ export async function gitExec(root: string, args: string): Promise<string> {
  * Unlike `gitExec`, `gh` has no `-C` flag — it reads the working tree itself.
  */
 export async function ghExec(cwd: string, args: string): Promise<string> {
-  const result = await $`gh ${{ raw: args }}`.cwd(cwd).quiet();
-  return result.text();
+  try {
+    const result = await $`gh ${{ raw: args }}`.cwd(cwd).quiet();
+    return result.text();
+  } catch (err) {
+    throwFormattedShellError(err);
+  }
+}
+
+/**
+ * Run a `glab` command quietly with a specific working directory, returning stdout text.
+ */
+export async function glabExec(cwd: string, args: string): Promise<string> {
+  try {
+    const result = await $`glab ${{ raw: args }}`.cwd(cwd).quiet();
+    return result.text();
+  } catch (err) {
+    throwFormattedShellError(err);
+  }
+}
+
+/**
+ * Run a `jj` command quietly with a specific working directory, returning stdout text.
+ */
+export async function jjExec(cwd: string, args: string): Promise<string> {
+  try {
+    const result = await $`jj ${{ raw: args }}`.cwd(cwd).quiet();
+    return result.text();
+  } catch (err) {
+    throwFormattedShellError(err);
+  }
 }
 
 const SHELL_STREAM_MAX_CHARS = 4000;
@@ -38,6 +70,16 @@ export function formatShellError(err: unknown): string | null {
   if (stderr.length > 0) parts.push(stderr);
   if (stdout.length > 0) parts.push(stdout);
   return parts.join('\n');
+}
+
+export function formatErrorMessage(err: unknown): string {
+  return formatShellError(err) ?? (err instanceof Error ? err.message : String(err));
+}
+
+export function throwFormattedShellError(err: unknown): never {
+  const formatted = formatShellError(err);
+  if (formatted) throw new Error(formatted);
+  throw err;
 }
 
 function truncate(text: string): string {

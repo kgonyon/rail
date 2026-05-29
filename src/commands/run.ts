@@ -1,12 +1,13 @@
 import { defineCommand } from 'citty';
 import consola from 'consola';
 import { join } from 'path';
-import { getProjectRoot, getWorktreePath, resolveRelativePath } from '../lib/paths';
+import { getWorktreePath, resolveRelativePath } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { loadPortAllocations, getPortsForFeature } from '../lib/ports';
 import { resolveFeature } from '../lib/detect';
 import { runHooks } from '../lib/hooks';
 import { runCommand } from '../lib/script';
+import { gitVcsDriver } from '../lib/vcs';
 import type { ScriptContext } from '../lib/script';
 import type { RailConfig, CommandConfig } from '../types/config';
 
@@ -28,7 +29,7 @@ export default defineCommand({
     },
   },
   async run({ args, rawArgs }) {
-    const root = await getProjectRoot();
+    const root = await gitVcsDriver.resolveProjectRoot();
     const config = loadConfig(root);
     const cmdConfig = findCommand(config, args.command);
     const scope = cmdConfig.scope ?? 'feature';
@@ -62,7 +63,7 @@ async function runFeatureScoped(
     basePort: ports[0] ?? 0,
   };
 
-  let command = resolveRelativePath(cmdConfig.command, join(treePath, '.rail'));
+  let command = resolveCommandPath(cmdConfig.command, root);
   if (extraArgs.length > 0) {
     command = `${command} ${shellEscape(extraArgs)}`;
   }
@@ -87,7 +88,7 @@ async function runProjectScoped(
     basePort: 0,
   };
 
-  let command = resolveRelativePath(cmdConfig.command, join(root, '.rail'));
+  let command = resolveCommandPath(cmdConfig.command, root);
   if (extraArgs.length > 0) {
     command = `${command} ${shellEscape(extraArgs)}`;
   }
@@ -119,6 +120,11 @@ export function findCommand(config: RailConfig, name: string): CommandConfig {
   }
 
   return cmd;
+}
+
+/** @internal */
+export function resolveCommandPath(command: string, root: string): string {
+  return resolveRelativePath(command, join(root, '.rail'));
 }
 
 function lookupPorts(root: string, feature: string, config: RailConfig): number[] {

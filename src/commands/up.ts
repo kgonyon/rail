@@ -1,11 +1,11 @@
 import { defineCommand } from 'citty';
 import consola from 'consola';
-import { getProjectRoot, getWorktreePath } from '../lib/paths';
+import { getWorktreePath } from '../lib/paths';
 import { loadConfig } from '../lib/config';
+import { validateFeatureName } from '../lib/config';
 import { allocatePorts, getPortsForFeature } from '../lib/ports';
-import { addWorktree, fetchFromOrigin } from '../lib/git';
+import { getVcsDriver, gitVcsDriver } from '../lib/vcs';
 import { generateEnvFiles } from '../lib/env';
-import { copyRailDirIfMissing } from '../lib/rail-dir';
 import { runHooks } from '../lib/hooks';
 import { runScript } from '../lib/script';
 import type { ScriptContext } from '../lib/script';
@@ -21,13 +21,36 @@ export default defineCommand({
       description: 'Feature name for the worktree',
       required: true,
     },
+    parent: {
+      type: 'string',
+      description: 'Parent ref to create the feature from',
+    },
+    noRefresh: {
+      type: 'boolean',
+      description: 'Skip automatic parent refresh before creating the feature',
+    },
   },
   async run({ args }) {
     const feature = args.feature;
-    const root = await getProjectRoot();
+    const root = await gitVcsDriver.resolveProjectRoot();
     const config = loadConfig(root);
+    const vcsDriver = getVcsDriver(config.vcs);
+    validateFeatureName(feature);
 
-    const defaultBranch = await fetchFromOrigin(root);
+    const effectiveParent = args.parent ?? config.default_parent;
+    if (config.auto_refresh && !args.noRefresh) {
+      try {
+        await vcsDriver.refreshParent(root, effectiveParent);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Failed to refresh parent "${effectiveParent}" before creating "${feature}".\n` +
+            `${detail}\n\nFix the refresh issue, or retry with \`rail up ${feature} --no-refresh\` to use current local state.`,
+        );
+      }
+    }
+
+    const parentRef = await vcsDriver.fetchParent(root, effectiveParent);
 
     const index = allocatePorts(root, feature, config.port);
     const ports = getPortsForFeature(config.port, index);
@@ -44,18 +67,14 @@ export default defineCommand({
 
     consola.start(`Setting up feature: ${feature}`);
 
-    await addWorktree(
+    await vcsDriver.createFeature({
       root,
-      treePath,
-      config.worktrees.branch_prefix,
+      path: treePath,
+      branchPrefix: config.worktrees.branch_prefix ?? '',
       feature,
-      `origin/${defaultBranch}`,
-    );
+      parentRef,
+    });
     consola.info(`Created worktree at ${treePath}`);
-
-    if (copyRailDirIfMissing(root, treePath)) {
-      consola.info('Copied .rail into worktree');
-    }
 
     consola.info(`Allocated ports: ${ports.join(', ')}`);
 
@@ -71,7 +90,7 @@ export default defineCommand({
 
     await runHooks('up', context);
 
-    printSummary(feature, config.worktrees.branch_prefix, ports, treePath);
+    printSummary(feature, config.worktrees.branch_prefix ?? '', ports, treePath);
   },
 });
 

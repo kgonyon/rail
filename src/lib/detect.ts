@@ -1,3 +1,6 @@
+import { validateFeatureName } from './config';
+import { getFeatureNameFromDirName } from './paths';
+
 export function detectFeatureFromCwd(cwd: string, treesDir: string): string | null {
   const normalized = cwd.replace(/\\/g, '/');
   const dir = treesDir.replace(/\\/g, '/').replace(/\/$/, '');
@@ -6,7 +9,8 @@ export function detectFeatureFromCwd(cwd: string, treesDir: string): string | nu
   if (!normalized.startsWith(prefix)) return null;
 
   const afterTrees = normalized.slice(prefix.length);
-  const feature = afterTrees.split('/')[0];
+  const featureDirName = afterTrees.split('/')[0];
+  const feature = featureDirName ? getFeatureNameFromDirName(featureDirName) : '';
 
   return feature || null;
 }
@@ -16,7 +20,10 @@ export function resolveFeature(
   treesDir: string,
   commandName?: string,
 ): string {
-  if (feature) return feature;
+  if (feature) {
+    validateFeatureName(feature);
+    return feature;
+  }
 
   const detected = detectFeatureFromCwd(process.cwd(), treesDir);
   if (!detected) {
@@ -28,5 +35,6 @@ export function resolveFeature(
     throw new Error('Could not detect feature name. Provide it as an argument.');
   }
 
+  validateFeatureName(detected);
   return detected;
 }

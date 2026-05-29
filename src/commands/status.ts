@@ -2,11 +2,13 @@ import { defineCommand } from 'citty';
 import consola from 'consola';
 import { basename } from 'path';
 import { isatty } from 'tty';
-import { getGitRoot, isRailProject } from '../lib/paths';
+import { getFeatureNameFromDirName, isRailProject } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { loadPortAllocations, getPortsForFeature } from '../lib/ports';
-import { listWorktrees, getWorktreeStats, getDefaultBranch, isGhAvailable } from '../lib/git';
-import type { WorktreeInfo, WorktreeStats } from '../lib/git';
+import { getForgeDriver } from '../lib/forge';
+import { getVcsDriver, gitVcsDriver } from '../lib/vcs';
+import type { VcsDriver, VcsFeature, VcsFeatureStatus } from '../lib/vcs';
+import type { ForgeDriver, OpenReviewsResult } from '../lib/forge';
 import type { PortAllocations, RailConfig } from '../types/config';
 
 export default defineCommand({
@@ -15,7 +17,7 @@ export default defineCommand({
     description: 'Show all active feature worktrees with branch, port, and dirty state',
   },
   async run() {
-    const root = await getGitRoot();
+    const root = await gitVcsDriver.resolveProjectRoot();
 
     if (!isRailProject(root)) {
       consola.warn('Not a rail project. Run `rail init` to initialize.');
@@ -23,8 +25,9 @@ export default defineCommand({
     }
 
     const config = loadConfig(root);
+    const vcsDriver = getVcsDriver(config.vcs);
     const allocations = loadPortAllocations(root);
-    const worktrees = await listWorktrees(root);
+    const worktrees = await vcsDriver.listFeatures(root);
     const treesDir = config.worktrees.dir.replace(/\/$/, '');
 
     const features = filterFeatureWorktrees(worktrees, treesDir);
@@ -34,24 +37,38 @@ export default defineCommand({
       return;
     }
 
-    const defaultBranch = await getDefaultBranch(root);
-    const ghAvailable = await isGhAvailable();
-    if (!ghAvailable) {
-      consola.warn('gh CLI unavailable; PR counts will be skipped');
+    const defaultBranch = await vcsDriver.getDefaultParent(root);
+    const forgeDriver = getForgeDriver(config.forge);
+    const forgeAvailable = forgeDriver.isAvailable
+      ? await forgeDriver.isAvailable()
+      : false;
+    if (!forgeAvailable && forgeDriver.unavailableWarning) {
+      consola.warn(forgeDriver.unavailableWarning);
     }
 
     consola.info(`Active features (${features.length}):\n`);
 
     const hyperlinks = shouldEmitHyperlinks();
-    const renders = await collectStats(features, { defaultBranch, ghAvailable });
+    const renders = await collectStats(features, {
+      defaultBranch,
+      vcsDriver,
+      forgeDriver,
+      forgeAvailable,
+    });
     for (const render of renders) {
-      printFeatureStatus(render, { allocations, config, defaultBranch, hyperlinks });
+      printFeatureStatus(render, {
+        allocations,
+        config,
+        defaultBranch,
+        hyperlinks,
+        forgeDriver,
+      });
     }
   },
 });
 
 /** @internal */
-export function filterFeatureWorktrees(worktrees: WorktreeInfo[], treesDir: string): WorktreeInfo[] {
+export function filterFeatureWorktrees(worktrees: VcsFeature[], treesDir: string): VcsFeature[] {
   const prefix = `${treesDir.replace(/\/$/, '')}/`;
   return worktrees.filter((wt) => wt.path.startsWith(prefix));
 }
@@ -75,13 +92,16 @@ export function shouldEmitHyperlinks(env = process.env): boolean {
 
 interface CollectStatsOptions {
   defaultBranch: string;
-  ghAvailable: boolean;
+  vcsDriver: VcsDriver;
+  forgeDriver: ForgeDriver;
+  forgeAvailable: boolean;
 }
 
 const STATS_CONCURRENCY = 8;
 
-async function collectStats(
-  features: WorktreeInfo[],
+/** @internal */
+export async function collectStats(
+  features: VcsFeature[],
   options: CollectStatsOptions,
 ): Promise<FeatureRender[]> {
   const results: FeatureRender[] = new Array(features.length);
@@ -91,17 +111,34 @@ async function collectStats(
       const i = cursor++;
       if (i >= features.length) return;
       const wt = features[i]!;
-      const stats = await getWorktreeStats(wt.path, {
+      const stats = await options.vcsDriver.getLocalFeatureStatus(wt.path, {
         defaultBranch: options.defaultBranch,
         branch: wt.branch,
-        ghAvailable: options.ghAvailable,
       });
+      const reviewHead = wt.branch || wt.head;
+      const openPrs = options.forgeAvailable
+        ? toOpenPrsResult(
+            await options.forgeDriver.getOpenReviews(wt.path, reviewHead),
+          )
+        : { state: 'unavailable' as const };
+      stats.openPrs = openPrs;
       results[i] = { wt, stats };
     }
   }
   const workerCount = Math.min(STATS_CONCURRENCY, features.length);
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
   return results;
+}
+
+function toOpenPrsResult(result: OpenReviewsResult): VcsFeatureStatus['openPrs'] {
+  switch (result.state) {
+    case 'unavailable':
+      return { state: 'unavailable' };
+    case 'error':
+      return { state: 'error' };
+    case 'ok':
+      return { state: 'ok', prs: result.reviews };
+  }
 }
 
 /**
@@ -125,10 +162,17 @@ export function linkify(url: string, hyperlinks: boolean): string {
  * @internal
  */
 export function formatStats(
-  stats: WorktreeStats,
+  stats: VcsFeatureStatus,
   defaultBranch: string,
-  options: { hyperlinks: boolean },
+  options: {
+    hyperlinks: boolean;
+    reviewLabel?: string;
+    reviewLabelPlural?: string;
+  },
 ): string[] {
+  if (stats.localState === 'unknown') return ['unknown'];
+  if (stats.localState === 'changed') return ['changed'];
+
   const lines: string[] = [];
   const changedTotal = stats.stagedFiles + stats.unstagedFiles;
 
@@ -153,7 +197,11 @@ export function formatStats(
     lines.push(`? commits ahead of ${defaultBranch}`);
   }
 
-  appendPrLines(lines, stats.openPrs, options.hyperlinks);
+  appendPrLines(lines, stats.openPrs, {
+    hyperlinks: options.hyperlinks,
+    reviewLabel: options.reviewLabel ?? 'PR',
+    reviewLabelPlural: options.reviewLabelPlural ?? 'PRs',
+  });
 
   if (lines.length === 0) return ['clean'];
   return lines;
@@ -161,25 +209,27 @@ export function formatStats(
 
 function appendPrLines(
   lines: string[],
-  openPrs: WorktreeStats['openPrs'],
-  hyperlinks: boolean,
+  openPrs: VcsFeatureStatus['openPrs'],
+  options: { hyperlinks: boolean; reviewLabel: string; reviewLabelPlural: string },
 ): void {
   switch (openPrs.state) {
     case 'unavailable':
       return;
     case 'error':
-      lines.push('? open PRs');
+      lines.push(`? open ${options.reviewLabelPlural}`);
       return;
     case 'ok': {
       const { prs } = openPrs;
       if (prs.length === 0) return;
       if (prs.length === 1) {
-        lines.push(`1 open PR: ${linkify(prs[0]!.url, hyperlinks)}`);
+        lines.push(
+          `1 open ${options.reviewLabel}: ${linkify(prs[0]!.url, options.hyperlinks)}`,
+        );
         return;
       }
-      lines.push(`${prs.length} open PRs:`);
+      lines.push(`${prs.length} open ${options.reviewLabelPlural}:`);
       for (const pr of prs) {
-        lines.push(`  #${pr.number} ${linkify(pr.url, hyperlinks)}`);
+        lines.push(`  #${pr.number} ${linkify(pr.url, options.hyperlinks)}`);
       }
       return;
     }
@@ -187,8 +237,8 @@ function appendPrLines(
 }
 
 interface FeatureRender {
-  wt: WorktreeInfo;
-  stats: WorktreeStats;
+  wt: VcsFeature;
+  stats: VcsFeatureStatus;
 }
 
 interface PrintFeatureOptions {
@@ -196,22 +246,27 @@ interface PrintFeatureOptions {
   config: RailConfig;
   defaultBranch: string;
   hyperlinks: boolean;
+  forgeDriver: ForgeDriver;
 }
 
 function printFeatureStatus(render: FeatureRender, options: PrintFeatureOptions): void {
   const { wt, stats } = render;
-  const { allocations, config, defaultBranch, hyperlinks } = options;
-  const feature = basename(wt.path);
+  const { allocations, config, defaultBranch, hyperlinks, forgeDriver } = options;
+  const feature = getFeatureDisplayName(wt);
   const allocation = allocations.features[feature];
   const ports = allocation
     ? getPortsForFeature(config.port, allocation.index)
     : [];
-  const branchName = wt.branch.replace('refs/heads/', '');
+  const refDisplay = getFeatureRefDisplay(wt);
   const portStr = ports.length > 0 ? ports.join(', ') : 'unallocated';
-  const lines = formatStats(stats, defaultBranch, { hyperlinks });
+  const lines = formatStats(stats, defaultBranch, {
+    hyperlinks,
+    reviewLabel: forgeDriver.reviewLabel,
+    reviewLabelPlural: forgeDriver.reviewLabelPlural,
+  });
 
   console.log(`  ${feature}`);
-  console.log(`    Branch: ${branchName}`);
+  console.log(`    ${refDisplay.label}: ${refDisplay.value}`);
   console.log(`    Ports:  ${portStr}`);
   if (lines.length === 1) {
     console.log(`    Status: ${lines[0]}`);
@@ -222,4 +277,17 @@ function printFeatureStatus(render: FeatureRender, options: PrintFeatureOptions)
     }
   }
   console.log('');
+}
+
+/** @internal */
+export function getFeatureDisplayName(wt: VcsFeature): string {
+  return wt.feature ?? getFeatureNameFromDirName(basename(wt.path));
+}
+
+/** @internal */
+export function getFeatureRefDisplay(wt: VcsFeature): { label: string; value: string } {
+  return {
+    label: wt.refLabel ?? 'Branch',
+    value: (wt.displayLabel ?? wt.branch).replace('refs/heads/', ''),
+  };
 }

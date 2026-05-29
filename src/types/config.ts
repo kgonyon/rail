@@ -2,7 +2,7 @@ import type { HookConfig } from './hooks';
 
 export interface WorktreesConfig {
   dir: string;
-  branch_prefix: string;
+  branch_prefix?: string;
 }
 
 export interface PortConfig {
@@ -30,8 +30,18 @@ export interface ScriptsConfig {
   cleanup?: string;
 }
 
+export interface SetupConfig {
+  track_rail: boolean;
+  ignore_destination: 'gitignore' | 'exclude';
+}
+
 export interface RailConfig {
   name: string;
+  vcs: 'git' | 'jj';
+  forge: 'github' | 'gitlab' | 'none';
+  default_parent: string;
+  auto_refresh: boolean;
+  setup: SetupConfig;
   worktrees: WorktreesConfig;
   port: PortConfig;
   scripts?: ScriptsConfig;

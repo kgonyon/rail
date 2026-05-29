@@ -5,6 +5,13 @@ import { homedir, tmpdir } from 'os';
 import { loadConfig } from './config';
 
 const baseConfig = `name: test-project
+vcs: git
+forge: github
+default_parent: main
+auto_refresh: true
+setup:
+  track_rail: true
+  ignore_destination: gitignore
 worktrees:
   dir: __PLACEHOLDER__
   branch_prefix: feature/
@@ -58,6 +65,19 @@ describe('loadConfig path resolution', () => {
     writeConfig(tempRoot, '/Users/me/.rail/repos/app');
     const config = loadConfig(tempRoot);
     expect(config.worktrees.dir).toBe('/Users/me/.rail/repos/app');
+  });
+
+  it('defaults a missing branch prefix to an empty string', () => {
+    mkdirSync(join(tempRoot, '.rail'), { recursive: true });
+    writeFileSync(
+      join(tempRoot, '.rail', 'config.yaml'),
+      baseConfig.replace('__PLACEHOLDER__', 'trees').replace('  branch_prefix: feature/\n', ''),
+      'utf-8',
+    );
+
+    const config = loadConfig(tempRoot);
+
+    expect(config.worktrees.branch_prefix).toBe('');
   });
 
   it('resolves the local.yaml override (not the base config) when both set dir', () => {

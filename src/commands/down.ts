@@ -57,7 +57,7 @@ export default defineCommand({
       await runScript(config.scripts.cleanup, context);
     }
 
-    await vcsDriver.removeFeature(root, treePath);
+    await vcsDriver.removeFeature(root, treePath, feature);
     consola.info('Removed worktree');
 
     deallocatePorts(root, feature);

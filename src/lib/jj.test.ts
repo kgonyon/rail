@@ -86,13 +86,13 @@ describe('JJ operations', () => {
   });
 
   it('forgets a workspace without deleting the bookmark and removes the directory as fallback', async () => {
-    await ops.removeJjWorkspace('/repo', '/repo/.trees/demo');
+    await ops.removeJjWorkspace('/repo', '/repo/.trees/demo', 'demo');
     failWorkspaceForget = true;
-    await ops.removeJjWorkspace('/repo', '/repo/.trees/stale');
+    await ops.removeJjWorkspace('/repo', '/repo/.trees/stale', 'stale');
 
     expect(calls).toEqual([
-      { cwd: '/repo', args: "workspace forget '/repo/.trees/demo'" },
-      { cwd: '/repo', args: "workspace forget '/repo/.trees/stale'" },
+      { cwd: '/repo', args: 'workspace forget demo' },
+      { cwd: '/repo', args: 'workspace forget stale' },
     ]);
     expect(removed).toEqual([
       { path: '/repo/.trees/stale', options: { force: true, recursive: true } },
@@ -110,6 +110,9 @@ describe('JJ operations', () => {
     await expect(
       ops.addJjWorkspace('/repo', '/repo/.trees/demo', 'feature/', '../demo', 'main@origin'),
     ).rejects.toThrow(/Invalid feature name/);
+    await expect(ops.removeJjWorkspace('/repo', '/repo/.trees/demo', '../demo')).rejects.toThrow(
+      /Invalid feature name/,
+    );
 
     expect(calls).toEqual([]);
   });

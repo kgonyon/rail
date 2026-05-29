@@ -99,7 +99,7 @@ describe('createGitVcsDriver', () => {
   });
 
   it('removes, lists, refreshes, and fetches configured parents through Git operations', async () => {
-    await driver.removeFeature('/repo', '/repo/.trees/demo');
+    await driver.removeFeature('/repo', '/repo/.trees/demo', 'demo');
     await expect(driver.listFeatures('/repo')).resolves.toEqual([
       { path: '/repo/.trees/demo', head: 'abc', branch: 'refs/heads/feature/demo' },
     ]);
@@ -159,8 +159,8 @@ const jjDeps = {
     });
     return Promise.resolve();
   },
-  removeJjWorkspace: (root: string, path: string) => {
-    calls.push({ name: 'removeJjWorkspace', args: [root, path] });
+  removeJjWorkspace: (root: string, path: string, feature: string) => {
+    calls.push({ name: 'removeJjWorkspace', args: [root, path, feature] });
     return Promise.resolve();
   },
   listJjWorkspaces: (root: string) => {
@@ -216,7 +216,7 @@ describe('createJjVcsDriver', () => {
   });
 
   it('removes, lists, and stats JJ workspaces without bookmark deletion', async () => {
-    await jjDriver.removeFeature('/repo', '/repo/.trees/demo');
+    await jjDriver.removeFeature('/repo', '/repo/.trees/demo', 'demo');
     await expect(jjDriver.listFeatures('/repo')).resolves.toEqual([
       { path: '/repo/.trees/demo', head: 'feature/demo', branch: 'feature/demo' },
     ]);
@@ -226,7 +226,7 @@ describe('createJjVcsDriver', () => {
     })).resolves.toMatchObject({ isDirty: false });
 
     expect(calls).toEqual([
-      { name: 'removeJjWorkspace', args: ['/repo', '/repo/.trees/demo'] },
+      { name: 'removeJjWorkspace', args: ['/repo', '/repo/.trees/demo', 'demo'] },
       { name: 'listJjWorkspaces', args: ['/repo'] },
       { name: 'getJjWorkspaceStats', args: ['/repo/.trees/demo'] },
     ]);

@@ -39,8 +39,8 @@ export async function addJjWorkspace(
   return createJjOperations().addJjWorkspace(root, treePath, bookmarkPrefix, feature, parentRef);
 }
 
-export async function removeJjWorkspace(root: string, treePath: string): Promise<void> {
-  return createJjOperations().removeJjWorkspace(root, treePath);
+export async function removeJjWorkspace(root: string, treePath: string, feature: string): Promise<void> {
+  return createJjOperations().removeJjWorkspace(root, treePath, feature);
 }
 
 export async function listJjWorkspaces(root: string): Promise<WorktreeInfo[]> {
@@ -97,9 +97,10 @@ export function createJjOperations(deps: JjOperationsDependencies = { jjExec, rm
       }
     },
 
-    async removeJjWorkspace(root: string, treePath: string): Promise<void> {
+    async removeJjWorkspace(root: string, treePath: string, feature: string): Promise<void> {
+      validateFeatureName(feature);
       try {
-        await deps.jjExec(root, `workspace forget ${shellQuote(treePath)}`);
+        await deps.jjExec(root, `workspace forget ${feature}`);
       } catch {
         await deps.rm(treePath, { force: true, recursive: true });
       }

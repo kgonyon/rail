@@ -37,7 +37,7 @@ export interface VcsDriver {
   refreshParent(root: string, parentRef: string): Promise<void>;
   fetchParent(root: string, parentRef: string): Promise<string>;
   createFeature(options: CreateFeatureOptions): Promise<void>;
-  removeFeature(root: string, path: string): Promise<void>;
+  removeFeature(root: string, path: string, feature: string): Promise<void>;
   listFeatures(root: string): Promise<VcsFeature[]>;
   getLocalFeatureStatus(
     path: string,
@@ -124,8 +124,8 @@ export function createJjVcsDriver(deps: JjVcsDriverDependencies): VcsDriver {
         options.parentRef,
       );
     },
-    removeFeature(root, path) {
-      return deps.removeJjWorkspace(root, path);
+    removeFeature(root, path, feature) {
+      return deps.removeJjWorkspace(root, path, feature);
     },
     listFeatures(root) {
       return deps.listJjWorkspaces(root);

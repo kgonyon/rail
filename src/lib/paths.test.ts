@@ -66,10 +66,12 @@ describe('getGitRoot', () => {
   it('includes VCS command output when root detection fails', async () => {
     const root = join(tmpdir(), `rail-root-error-${Date.now()}-${Math.random()}`);
     const originalCwd = process.cwd();
+    const originalGitCeilingDirectories = process.env.GIT_CEILING_DIRECTORIES;
     mkdirSync(root, { recursive: true });
 
     try {
       process.chdir(root);
+      process.env.GIT_CEILING_DIRECTORIES = tmpdir();
       let caught: unknown;
       try {
         await getGitRoot();
@@ -84,6 +86,11 @@ describe('getGitRoot', () => {
       expect(message).toContain('Failed with exit code');
     } finally {
       process.chdir(originalCwd);
+      if (originalGitCeilingDirectories === undefined) {
+        delete process.env.GIT_CEILING_DIRECTORIES;
+      } else {
+        process.env.GIT_CEILING_DIRECTORIES = originalGitCeilingDirectories;
+      }
       rmSync(root, { force: true, recursive: true });
     }
   });

@@ -61,7 +61,10 @@ describe('gitExec', () => {
   test('forwards git stderr when a command fails', async () => {
     const root = mkdtempSync(join(tmpdir(), 'rail-shell-'));
     try {
-      await expect(gitExec(root, 'definitely-not-a-git-command')).rejects.toThrow(/is not a git command/);
+      await $`git -C ${root} init`.quiet();
+      await expect(gitExec(root, 'branch --delete rail-shell-missing-branch')).rejects.toThrow(
+        /rail-shell-missing-branch/,
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

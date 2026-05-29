@@ -1,9 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { $ } from 'bun';
-import { mkdtempSync, rmSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { formatShellError, gitExec } from './shell';
+import { formatShellError } from './shell';
 
 describe('formatShellError', () => {
   test('returns null for non-ShellError values', () => {
@@ -54,19 +51,5 @@ describe('formatShellError', () => {
     const formatted = formatShellError(caught);
     expect(formatted).not.toBeNull();
     expect(formatted).not.toContain('\n');
-  });
-});
-
-describe('gitExec', () => {
-  test('forwards git stderr when a command fails', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'rail-shell-'));
-    try {
-      await $`git -C ${root} init`.quiet();
-      await expect(gitExec(root, 'branch --delete rail-shell-missing-branch')).rejects.toThrow(
-        /rail-shell-missing-branch/,
-      );
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
   });
 });

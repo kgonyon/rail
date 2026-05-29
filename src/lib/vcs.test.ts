@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
-import { createGitVcsDriver } from './vcs';
+import { createGitVcsDriver, createJjVcsDriver } from './vcs';
 import type { WorktreeStatsOptions } from './git';
 
 const calls: Array<{ name: string; args: unknown[] }> = [];
@@ -99,7 +99,7 @@ describe('createGitVcsDriver', () => {
   });
 
   it('removes, lists, refreshes, and fetches configured parents through Git operations', async () => {
-    await driver.removeFeature('/repo', '/repo/.trees/demo');
+    await driver.removeFeature('/repo', '/repo/.trees/demo', 'demo');
     await expect(driver.listFeatures('/repo')).resolves.toEqual([
       { path: '/repo/.trees/demo', head: 'abc', branch: 'refs/heads/feature/demo' },
     ]);
@@ -132,5 +132,108 @@ describe('createGitVcsDriver', () => {
       { name: 'getDefaultBranch', args: ['/repo'] },
       { name: 'getWorktreeStats', args: ['/repo/.trees/demo', statusOptions] },
     ]);
+  });
+});
+
+const jjDeps = {
+  getGitRoot: deps.getGitRoot,
+  getProjectRoot: deps.getProjectRoot,
+  refreshJjParent: (root: string, parentRef: string) => {
+    calls.push({ name: 'refreshJjParent', args: [root, parentRef] });
+    return Promise.resolve();
+  },
+  fetchJjParent: (root: string, parentRef: string) => {
+    calls.push({ name: 'fetchJjParent', args: [root, parentRef] });
+    return Promise.resolve(parentRef);
+  },
+  addJjWorkspace: (
+    root: string,
+    path: string,
+    bookmarkPrefix: string,
+    feature: string,
+    parentRef?: string,
+  ) => {
+    calls.push({
+      name: 'addJjWorkspace',
+      args: [root, path, bookmarkPrefix, feature, parentRef],
+    });
+    return Promise.resolve();
+  },
+  removeJjWorkspace: (root: string, path: string, feature: string) => {
+    calls.push({ name: 'removeJjWorkspace', args: [root, path, feature] });
+    return Promise.resolve();
+  },
+  listJjWorkspaces: (root: string) => {
+    calls.push({ name: 'listJjWorkspaces', args: [root] });
+    return Promise.resolve([
+      { path: '/repo/.trees/demo', head: 'feature/demo', branch: 'feature/demo' },
+    ]);
+  },
+  getJjWorkspaceStats: (path: string) => {
+    calls.push({ name: 'getJjWorkspaceStats', args: [path] });
+    return Promise.resolve({
+      fileCount: 0,
+      stagedFiles: 0,
+      unstagedFiles: 0,
+      untrackedFiles: 0,
+      insertions: 0,
+      deletions: 0,
+      isDirty: false,
+      commitsAhead: 0,
+      openPrs: { state: 'ok' as const, prs: [] },
+    });
+  },
+};
+
+const jjDriver = createJjVcsDriver(jjDeps);
+
+describe('createJjVcsDriver', () => {
+  it('creates JJ workspaces with path, workspace name, bookmark prefix, and parent ref', async () => {
+    await jjDriver.createFeature({
+      root: '/repo',
+      path: '/repo/.trees/demo',
+      branchPrefix: 'feature/',
+      feature: 'demo',
+      parentRef: 'main@origin',
+    });
+
+    expect(calls).toEqual([
+      {
+        name: 'addJjWorkspace',
+        args: ['/repo', '/repo/.trees/demo', 'feature/', 'demo', 'main@origin'],
+      },
+    ]);
+  });
+
+  it('refreshes and resolves JJ parents through JJ operations', async () => {
+    await jjDriver.refreshParent('/repo', 'main@origin');
+    await expect(jjDriver.fetchParent('/repo', 'release')).resolves.toBe('release');
+
+    expect(calls).toEqual([
+      { name: 'refreshJjParent', args: ['/repo', 'main@origin'] },
+      { name: 'fetchJjParent', args: ['/repo', 'release'] },
+    ]);
+  });
+
+  it('removes, lists, and stats JJ workspaces without bookmark deletion', async () => {
+    await jjDriver.removeFeature('/repo', '/repo/.trees/demo', 'demo');
+    await expect(jjDriver.listFeatures('/repo')).resolves.toEqual([
+      { path: '/repo/.trees/demo', head: 'feature/demo', branch: 'feature/demo' },
+    ]);
+    await expect(jjDriver.getLocalFeatureStatus('/repo/.trees/demo', {
+      defaultBranch: 'main@origin',
+      branch: 'feature/demo',
+    })).resolves.toMatchObject({ isDirty: false });
+
+    expect(calls).toEqual([
+      { name: 'removeJjWorkspace', args: ['/repo', '/repo/.trees/demo', 'demo'] },
+      { name: 'listJjWorkspaces', args: ['/repo'] },
+      { name: 'getJjWorkspaceStats', args: ['/repo/.trees/demo'] },
+    ]);
+  });
+
+  it('uses main@origin as the JJ default parent', async () => {
+    await expect(jjDriver.getDefaultParent('/repo')).resolves.toBe('main@origin');
+    expect(calls).toEqual([]);
   });
 });

@@ -4,7 +4,7 @@ import { getWorktreePath } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { validateFeatureName } from '../lib/config';
 import { allocatePorts, getPortsForFeature } from '../lib/ports';
-import { gitVcsDriver } from '../lib/vcs';
+import { getVcsDriver, gitVcsDriver } from '../lib/vcs';
 import { generateEnvFiles } from '../lib/env';
 import { runHooks } from '../lib/hooks';
 import { runScript } from '../lib/script';
@@ -34,12 +34,13 @@ export default defineCommand({
     const feature = args.feature;
     const root = await gitVcsDriver.resolveProjectRoot();
     const config = loadConfig(root);
+    const vcsDriver = getVcsDriver(config.vcs);
     validateFeatureName(feature);
 
     const effectiveParent = args.parent ?? config.default_parent;
     if (config.auto_refresh && !args.noRefresh) {
       try {
-        await gitVcsDriver.refreshParent(root, effectiveParent);
+        await vcsDriver.refreshParent(root, effectiveParent);
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         throw new Error(
@@ -49,7 +50,7 @@ export default defineCommand({
       }
     }
 
-    const parentRef = await gitVcsDriver.fetchParent(root, effectiveParent);
+    const parentRef = await vcsDriver.fetchParent(root, effectiveParent);
 
     const index = allocatePorts(root, feature, config.port);
     const ports = getPortsForFeature(config.port, index);
@@ -66,7 +67,7 @@ export default defineCommand({
 
     consola.start(`Setting up feature: ${feature}`);
 
-    await gitVcsDriver.createFeature({
+    await vcsDriver.createFeature({
       root,
       path: treePath,
       branchPrefix: config.worktrees.branch_prefix,

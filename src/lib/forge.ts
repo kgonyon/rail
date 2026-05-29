@@ -1,4 +1,4 @@
-import { ghExec } from './shell';
+import { ghExec, glabExec } from './shell';
 import type { RailConfig } from '../types/config';
 
 export interface OpenReviewInfo {
@@ -20,6 +20,7 @@ export interface ForgeDriver {
 }
 
 let ghAvailableCache: boolean | null = null;
+let glabAvailableCache: boolean | null = null;
 
 /**
  * Probe `gh auth status` once per process to determine if `gh` is installed and
@@ -41,6 +42,26 @@ export function __resetGhAvailableCache(): void {
   ghAvailableCache = null;
 }
 
+/**
+ * Probe `glab auth status` once per process to determine if `glab` is installed
+ * and authenticated. Subsequent calls return the cached boolean.
+ */
+export async function isGlabAvailable(): Promise<boolean> {
+  if (glabAvailableCache !== null) return glabAvailableCache;
+  try {
+    await glabExec(process.cwd(), 'auth status');
+    glabAvailableCache = true;
+  } catch {
+    glabAvailableCache = false;
+  }
+  return glabAvailableCache;
+}
+
+/** Reset the cached `glab` availability — for tests only. */
+export function __resetGlabAvailableCache(): void {
+  glabAvailableCache = null;
+}
+
 const MAX_OPEN_REVIEWS = 50;
 
 /**
@@ -49,6 +70,22 @@ const MAX_OPEN_REVIEWS = 50;
  * failure so callers can surface an unknown review state.
  */
 export function parseGhPrListJson(output: string): OpenReviewInfo[] | null {
+  return parseReviewListJson(output, toOpenReviewInfo);
+}
+
+/**
+ * Parse JSON output from `glab mr list --output json`.
+ * Returns valid entries only, caps output, and returns `null` on parse-level
+ * failure so callers can surface an unknown review state.
+ */
+export function parseGlabMrListJson(output: string): OpenReviewInfo[] | null {
+  return parseReviewListJson(output, toOpenGitLabReviewInfo);
+}
+
+function parseReviewListJson(
+  output: string,
+  convert: (entry: unknown) => OpenReviewInfo | null,
+): OpenReviewInfo[] | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(output);
@@ -58,7 +95,7 @@ export function parseGhPrListJson(output: string): OpenReviewInfo[] | null {
   if (!Array.isArray(parsed)) return null;
   const reviews: OpenReviewInfo[] = [];
   for (const entry of parsed) {
-    const info = toOpenReviewInfo(entry);
+    const info = convert(entry);
     if (info !== null) reviews.push(info);
   }
   return reviews.slice(0, MAX_OPEN_REVIEWS);
@@ -82,6 +119,16 @@ function toOpenReviewInfo(entry: unknown): OpenReviewInfo | null {
   const record = entry as Record<string, unknown>;
   const num = record.number;
   const url = record.url;
+  if (typeof num !== 'number' || !Number.isInteger(num) || num <= 0) return null;
+  if (typeof url !== 'string' || !isSafeReviewUrl(url)) return null;
+  return { number: num, url };
+}
+
+function toOpenGitLabReviewInfo(entry: unknown): OpenReviewInfo | null {
+  if (typeof entry !== 'object' || entry === null) return null;
+  const record = entry as Record<string, unknown>;
+  const num = record.iid;
+  const url = record.web_url ?? record.webUrl ?? record.url;
   if (typeof num !== 'number' || !Number.isInteger(num) || num <= 0) return null;
   if (typeof url !== 'string' || !isSafeReviewUrl(url)) return null;
   return { number: num, url };
@@ -115,6 +162,18 @@ export async function getOpenGitHubReviews(
   return listOpenGitHubReviews(treePath, headName);
 }
 
+/**
+ * List open GitLab MRs whose source branch is `headName` via `glab mr list`.
+ */
+export async function getOpenGitLabReviews(
+  treePath: string,
+  headName: string,
+): Promise<OpenReviewsResult> {
+  if (normalizeHeadName(headName) === null) return { state: 'error' };
+  if (!await isGlabAvailable()) return { state: 'unavailable' };
+  return listOpenGitLabReviews(treePath, headName);
+}
+
 /** @internal */
 export async function listOpenGitHubReviews(
   treePath: string,
@@ -135,12 +194,40 @@ export async function listOpenGitHubReviews(
   }
 }
 
+/** @internal */
+export async function listOpenGitLabReviews(
+  treePath: string,
+  headName: string,
+): Promise<OpenReviewsResult> {
+  const normalized = normalizeHeadName(headName);
+  if (normalized === null) return { state: 'error' };
+  try {
+    const out = await glabExec(
+      treePath,
+      `mr list --source-branch ${normalized} --state opened --output json`,
+    );
+    const reviews = parseGlabMrListJson(out);
+    if (reviews === null) return { state: 'error' };
+    return { state: 'ok', reviews };
+  } catch {
+    return { state: 'error' };
+  }
+}
+
 export const githubForgeDriver: ForgeDriver = {
   reviewLabel: 'PR',
   reviewLabelPlural: 'PRs',
   unavailableWarning: 'gh CLI unavailable; PR counts will be skipped',
   isAvailable: isGhAvailable,
   getOpenReviews: getOpenGitHubReviews,
+};
+
+export const gitlabForgeDriver: ForgeDriver = {
+  reviewLabel: 'MR',
+  reviewLabelPlural: 'MRs',
+  unavailableWarning: 'glab CLI unavailable; MR counts will be skipped',
+  isAvailable: isGlabAvailable,
+  getOpenReviews: getOpenGitLabReviews,
 };
 
 export const noneForgeDriver: ForgeDriver = {
@@ -158,6 +245,6 @@ export function getForgeDriver(forge: RailConfig['forge']): ForgeDriver {
     case 'none':
       return noneForgeDriver;
     case 'gitlab':
-      return noneForgeDriver;
+      return gitlabForgeDriver;
   }
 }

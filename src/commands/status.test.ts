@@ -201,6 +201,21 @@ describe('formatStats', () => {
     expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['? open PRs']);
   });
 
+  it('renders open reviews with MR labels when provided by the forge driver', () => {
+    const stats = makeStats({
+      openPrs: {
+        state: 'ok',
+        prs: [{ number: 123, url: 'https://gitlab.com/owner/repo/-/merge_requests/123' }],
+      },
+    });
+
+    expect(formatStats(stats, 'main', {
+      hyperlinks: false,
+      reviewLabel: 'MR',
+      reviewLabelPlural: 'MRs',
+    })).toEqual(['1 open MR: https://gitlab.com/owner/repo/-/merge_requests/123']);
+  });
+
   it('omits PR lines when openPrs state is unavailable', () => {
     const stats = makeStats({ openPrs: { state: 'unavailable' } });
     expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['clean']);

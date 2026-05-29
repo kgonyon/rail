@@ -18,7 +18,7 @@ const ops = createJjOperations({
       return Promise.reject(new Error('workspace missing'));
     }
     if (args === 'workspace list') {
-      return Promise.resolve('main: /repo\ndemo: /repo/.trees/demo\n');
+      return Promise.resolve('main: /repo\ndemo: abc123 feature/demo* /repo/.trees/demo\n');
     }
     if (args === 'diff --stat') {
       return Promise.resolve('M file.ts | 1 +\n');
@@ -119,13 +119,51 @@ describe('JJ operations', () => {
 
   it('parses workspace list output and reports simple dirty state', async () => {
     await expect(ops.listJjWorkspaces('/repo')).resolves.toEqual([
-      { path: '/repo', head: 'main', branch: 'main' },
-      { path: '/repo/.trees/demo', head: 'demo', branch: 'demo' },
+      { path: '/repo', head: 'main', branch: 'main', feature: 'repo', displayLabel: 'main', refLabel: 'Bookmark' },
+      { path: '/repo/.trees/demo', head: 'feature/demo', branch: 'feature/demo', feature: 'demo', displayLabel: 'feature/demo', refLabel: 'Bookmark' },
     ]);
     await expect(ops.getJjWorkspaceStats('/repo/.trees/demo')).resolves.toMatchObject({
-      fileCount: 1,
+      fileCount: 0,
       isDirty: true,
+      localState: 'changed',
     });
     expect(parseJjWorkspaceList('\n')).toEqual([]);
+  });
+
+  it('parses legacy workspace path-only lines and strips bookmark markers', () => {
+    expect(parseJjWorkspaceList('demo: /repo/.trees/demo\n')).toEqual([
+      { path: '/repo/.trees/demo', head: 'demo', branch: 'demo', feature: 'demo', displayLabel: 'demo', refLabel: 'Bookmark' },
+    ]);
+    expect(parseJjWorkspaceList('demo: kkmp feature/demo@origin feature/demo* /repo/.trees/demo\n')).toEqual([
+      { path: '/repo/.trees/demo', head: 'feature/demo', branch: 'feature/demo', feature: 'demo', displayLabel: 'feature/demo', refLabel: 'Bookmark' },
+    ]);
+  });
+
+  it('reports clean and unknown simple JJ states', async () => {
+    const cleanOps = createJjOperations({
+      jjExec() {
+        return Promise.resolve('');
+      },
+      rm() {
+        return Promise.resolve();
+      },
+    });
+    await expect(cleanOps.getJjWorkspaceStats('/repo/.trees/demo')).resolves.toMatchObject({
+      isDirty: false,
+      localState: 'clean',
+    });
+
+    const unknownOps = createJjOperations({
+      jjExec() {
+        return Promise.reject(new Error('jj failed'));
+      },
+      rm() {
+        return Promise.resolve();
+      },
+    });
+    await expect(unknownOps.getJjWorkspaceStats('/repo/.trees/demo')).resolves.toMatchObject({
+      isDirty: false,
+      localState: 'unknown',
+    });
   });
 });

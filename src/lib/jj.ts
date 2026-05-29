@@ -1,5 +1,6 @@
 import { rm } from 'fs/promises';
 import consola from 'consola';
+import { basename } from 'path';
 import { isSafeParentRefName, validateFeatureName } from './config';
 import { jjExec } from './shell';
 import type { WorktreeInfo, WorktreeStats } from './git';
@@ -114,9 +115,10 @@ export function createJjOperations(deps: JjOperationsDependencies = { jjExec, rm
     async getJjWorkspaceStats(path: string): Promise<WorktreeStats> {
       try {
         const output = await deps.jjExec(path, 'diff --stat');
-        return { ...CLEAN_STATS, isDirty: output.trim().length > 0, fileCount: output.trim() ? 1 : 0 };
+        const isDirty = output.trim().length > 0;
+        return { ...CLEAN_STATS, isDirty, localState: isDirty ? 'changed' : 'clean' };
       } catch {
-        return { ...CLEAN_STATS, openPrs: { state: 'unavailable' } };
+        return { ...CLEAN_STATS, localState: 'unknown', openPrs: { state: 'unavailable' } };
       }
     },
   };
@@ -129,11 +131,55 @@ export function parseJjWorkspaceList(output: string): WorktreeInfo[] {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-    .map((line) => {
-      const [name = '', path = ''] = line.split(':').map((part) => part.trim());
-      return { path, head: name, branch: name };
-    })
+    .map(parseJjWorkspaceLine)
     .filter((workspace) => workspace.path.length > 0);
+}
+
+function parseJjWorkspaceLine(line: string): WorktreeInfo {
+  const separator = line.indexOf(':');
+  if (separator === -1) return emptyWorkspace();
+
+  const workspaceName = line.slice(0, separator).trim();
+  const rest = line.slice(separator + 1).trim();
+  if (!workspaceName || !rest) return emptyWorkspace();
+
+  const tokens = rest.split(/\s+/);
+  let pathIndex = -1;
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    if (tokens[i]!.includes('/')) {
+      pathIndex = i;
+      break;
+    }
+  }
+  const path = pathIndex === -1 ? rest : tokens[pathIndex]!;
+  const label = findBookmarkLabel(tokens.slice(0, pathIndex === -1 ? 0 : pathIndex)) ?? workspaceName;
+  return {
+    path,
+    head: label,
+    branch: label,
+    feature: basename(path),
+    displayLabel: label,
+    refLabel: 'Bookmark',
+  };
+}
+
+function findBookmarkLabel(tokens: string[]): string | null {
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    const label = normalizeBookmarkToken(tokens[i]!);
+    if (label) return label;
+  }
+  return null;
+}
+
+function normalizeBookmarkToken(token: string): string | null {
+  const cleaned = token.replace(/[*,]+$/g, '');
+  if (!cleaned || cleaned.includes('@')) return null;
+  if (/^[0-9a-f]{6,}$/i.test(cleaned)) return null;
+  return cleaned;
+}
+
+function emptyWorkspace(): WorktreeInfo {
+  return { path: '', head: '', branch: '' };
 }
 
 function parseRemoteBookmark(ref: string): { bookmark: string; remote: string } | null {

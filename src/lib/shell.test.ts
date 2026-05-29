@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { $ } from 'bun';
-import { formatShellError } from './shell';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { formatShellError, gitExec } from './shell';
 
 describe('formatShellError', () => {
   test('returns null for non-ShellError values', () => {
@@ -51,5 +54,17 @@ describe('formatShellError', () => {
     const formatted = formatShellError(caught);
     expect(formatted).not.toBeNull();
     expect(formatted).not.toContain('\n');
+  });
+});
+
+describe('gitExec', () => {
+  test('forwards git stderr when a command fails', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'rail-shell-'));
+    try {
+      await expect(gitExec(root, 'status')).rejects.toThrow(/not a git repository/);
+      await expect(gitExec(root, 'status')).rejects.toThrow(/Failed with exit code/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

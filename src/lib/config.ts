@@ -7,7 +7,7 @@ const CONFIG_REPAIR_MESSAGE = 'Run `rail init` to repair the project config.';
 const VCS_VALUES = ['git', 'jj'];
 const FORGE_VALUES = ['github', 'gitlab', 'none'];
 const IGNORE_DESTINATION_VALUES = ['gitignore', 'exclude'];
-const FEATURE_NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
+const FEATURE_NAME_PATTERN = /^[A-Za-z0-9._\-/]+$/;
 const PARENT_REF_PATTERN = /^[A-Za-z0-9._\-/@]+$/;
 const REF_NAME_MAX_LENGTH = 255;
 
@@ -53,6 +53,7 @@ export function loadConfig(root: string): RailConfig {
   }
 
   validateConfig(config);
+  config.worktrees.branch_prefix ??= '';
   config.worktrees.dir = resolveWorktreesDir(root, config.worktrees.dir);
 
   return config;
@@ -88,15 +89,17 @@ export function validateConfig(config: unknown): asserts config is RailConfig {
 /** @internal */
 export function isSafeFeatureName(name: string): boolean {
   if (!name || name.length > REF_NAME_MAX_LENGTH) return false;
-  if (name === '.' || name === '..') return false;
-  return FEATURE_NAME_PATTERN.test(name);
+  if (!FEATURE_NAME_PATTERN.test(name)) return false;
+
+  const segments = name.split('/');
+  return segments.every((segment) => segment !== '' && segment !== '.' && segment !== '..');
 }
 
 /** @internal */
 export function validateFeatureName(name: string): void {
   if (!isSafeFeatureName(name)) {
     throw new Error(
-      `Invalid feature name "${name}". Use a single path segment containing only letters, digits, dot, underscore, or hyphen.`,
+      `Invalid feature name "${name}". Use slash-separated segments containing only letters, digits, dot, underscore, or hyphen.`,
     );
   }
 }
@@ -114,10 +117,25 @@ function validateWorktrees(value: unknown, errors: string[]): void {
   }
 
   requireNonEmptyString(value, 'worktrees.dir', errors, 'dir');
-  const branchPrefix = requireString(value, 'worktrees.branch_prefix', errors, 'branch_prefix');
+  const branchPrefix = optionalString(value, 'worktrees.branch_prefix', errors, 'branch_prefix');
   if (branchPrefix && !isSafeParentRefName(branchPrefix)) {
     errors.push('worktrees.branch_prefix must contain only letters, digits, dot, underscore, hyphen, slash, or @');
   }
+}
+
+function optionalString(
+  object: Record<string, any>,
+  label: string,
+  errors: string[],
+  key = label,
+): string | undefined {
+  const value = object[key];
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') {
+    errors.push(`${label} must be a string`);
+    return undefined;
+  }
+  return value;
 }
 
 function validatePort(value: unknown, errors: string[]): void {

@@ -2,7 +2,7 @@ import { defineCommand } from 'citty';
 import consola from 'consola';
 import { basename } from 'path';
 import { isatty } from 'tty';
-import { isRailProject } from '../lib/paths';
+import { getFeatureNameFromDirName, isRailProject } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { loadPortAllocations, getPortsForFeature } from '../lib/ports';
 import { getForgeDriver } from '../lib/forge';
@@ -281,7 +281,7 @@ function printFeatureStatus(render: FeatureRender, options: PrintFeatureOptions)
 
 /** @internal */
 export function getFeatureDisplayName(wt: VcsFeature): string {
-  return wt.feature ?? basename(wt.path);
+  return wt.feature ?? getFeatureNameFromDirName(basename(wt.path));
 }
 
 /** @internal */

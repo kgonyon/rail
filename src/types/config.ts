@@ -2,7 +2,7 @@ import type { HookConfig } from './hooks';
 
 export interface WorktreesConfig {
   dir: string;
-  branch_prefix: string;
+  branch_prefix?: string;
 }
 
 export interface PortConfig {

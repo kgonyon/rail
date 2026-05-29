@@ -2,8 +2,13 @@ import { $ } from 'bun';
 import { dirname, isAbsolute, join } from 'path';
 import { existsSync } from 'fs';
 import { homedir } from 'os';
+import { formatErrorMessage } from './shell';
+
+const FEATURE_DIR_SEPARATOR = '+';
 
 export async function getGitRoot(): Promise<string> {
+  const errors: string[] = [];
+
   try {
     const commonDir = await $`git rev-parse --path-format=absolute --git-common-dir`.quiet();
     const resolved = commonDir.text().trim();
@@ -11,19 +16,32 @@ export async function getGitRoot(): Promise<string> {
     // Strip /worktrees/<name> if present, then strip /.git suffix
     const stripped = resolved.replace(/\/worktrees\/[^/]+$/, '');
     return stripped.replace(/\/\.git$/, '') || stripped;
-  } catch {
-    try {
-      const result = await $`git rev-parse --show-toplevel`.quiet();
-      return result.text().trim();
-    } catch {
-      try {
-        const result = await $`jj root`.quiet();
-        return result.text().trim();
-      } catch {
-        throw new Error('Not inside a git or jj repository. Run this command from within a project.');
-      }
-    }
+  } catch (err) {
+    errors.push(formatRootError('git common dir', err));
   }
+
+  try {
+    const result = await $`git rev-parse --show-toplevel`.quiet();
+    return result.text().trim();
+  } catch (err) {
+    errors.push(formatRootError('git top-level', err));
+  }
+
+  try {
+    const result = await $`jj root`.quiet();
+    return result.text().trim();
+  } catch (err) {
+    errors.push(formatRootError('jj root', err));
+  }
+
+  throw new Error(
+    'Not inside a git or jj repository. Run this command from within a project.' +
+      `\n\n${errors.join('\n\n')}`,
+  );
+}
+
+function formatRootError(label: string, err: unknown): string {
+  return `${label} failed:\n${formatErrorMessage(err)}`;
 }
 
 export async function getProjectRoot(): Promise<string> {
@@ -51,7 +69,15 @@ export function findRailProjectRoot(start: string): string | null {
 }
 
 export function getWorktreePath(dir: string, feature: string): string {
-  return join(dir, feature);
+  return join(dir, getFeatureDirName(feature));
+}
+
+export function getFeatureDirName(feature: string): string {
+  return feature.replaceAll('/', FEATURE_DIR_SEPARATOR);
+}
+
+export function getFeatureNameFromDirName(dirName: string): string {
+  return dirName.replaceAll(FEATURE_DIR_SEPARATOR, '/');
 }
 
 /**

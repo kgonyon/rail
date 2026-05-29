@@ -1,6 +1,6 @@
 import { $ } from 'bun';
 import consola from 'consola';
-import { gitExec } from './shell';
+import { gitExec, throwFormattedShellError } from './shell';
 export {
   __resetGhAvailableCache,
   isGhAvailable,
@@ -51,7 +51,11 @@ export async function addWorktree(
   const branchExists = await checkBranchExists(root, branch);
 
   if (branchExists) {
-    await $`git -C ${root} worktree add ${treePath} ${branch}`.quiet();
+    try {
+      await $`git -C ${root} worktree add ${treePath} ${branch}`.quiet();
+    } catch (err) {
+      throwFormattedShellError(err);
+    }
     return;
   }
 
@@ -59,11 +63,19 @@ export async function addWorktree(
     if (!isSafeRefName(startPoint)) {
       throw new Error(`Unsafe start-point ref: ${startPoint}`);
     }
-    await $`git -C ${root} worktree add ${treePath} -b ${branch} ${startPoint}`.quiet();
+    try {
+      await $`git -C ${root} worktree add ${treePath} -b ${branch} ${startPoint}`.quiet();
+    } catch (err) {
+      throwFormattedShellError(err);
+    }
     return;
   }
 
-  await $`git -C ${root} worktree add ${treePath} -b ${branch}`.quiet();
+  try {
+    await $`git -C ${root} worktree add ${treePath} -b ${branch}`.quiet();
+  } catch (err) {
+    throwFormattedShellError(err);
+  }
 }
 
 async function checkBranchExists(root: string, branch: string): Promise<boolean> {
@@ -76,12 +88,28 @@ async function checkBranchExists(root: string, branch: string): Promise<boolean>
 }
 
 export async function removeWorktree(root: string, treePath: string): Promise<void> {
-  await $`git -C ${root} worktree remove ${treePath} --force`.quiet();
+  try {
+    await $`git -C ${root} worktree remove ${treePath} --force`.quiet();
+  } catch (err) {
+    throwFormattedShellError(err);
+  }
+}
+
+export async function deleteBranch(root: string, branch: string): Promise<void> {
+  if (!isSafeRefName(branch)) {
+    throw new Error(`Unsafe branch ref: ${branch}`);
+  }
+
+  await gitExec(root, `branch -D -- ${branch}`);
 }
 
 export async function listWorktrees(root: string): Promise<WorktreeInfo[]> {
-  const result = await $`git -C ${root} worktree list --porcelain`.quiet();
-  return parsePorcelainOutput(result.text());
+  try {
+    const result = await $`git -C ${root} worktree list --porcelain`.quiet();
+    return parsePorcelainOutput(result.text());
+  } catch (err) {
+    throwFormattedShellError(err);
+  }
 }
 
 /** @internal */

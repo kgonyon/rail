@@ -1,6 +1,6 @@
 import { $ } from 'bun';
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { getProjectRoot } from './paths';
@@ -36,7 +36,7 @@ describe('canonical root resolution from feature trees', () => {
 
   beforeEach(async () => {
     originalCwd = process.cwd();
-    tempRoot = mkdtempSync(join(tmpdir(), 'rail-root-test-'));
+    tempRoot = realpathSync(mkdtempSync(join(tmpdir(), 'rail-root-test-')));
     mkdirSync(join(tempRoot, '.rail'), { recursive: true });
     writeFileSync(join(tempRoot, '.rail', 'config.yaml'), configYaml, 'utf-8');
     writeFileSync(join(tempRoot, 'README.md'), '# test\n', 'utf-8');

@@ -110,6 +110,17 @@ describe('validateConfig', () => {
     expect(() => validateConfig(validConfig())).not.toThrow();
   });
 
+  it('accepts configs without a branch prefix', () => {
+    const config = validConfig({ worktrees: { branch_prefix: undefined } });
+    delete config.worktrees.branch_prefix;
+
+    expect(() => validateConfig(config)).not.toThrow();
+  });
+
+  it('accepts an empty branch prefix', () => {
+    expect(() => validateConfig(validConfig({ worktrees: { branch_prefix: '' } }))).not.toThrow();
+  });
+
   it('rejects missing required extended keys and tells users to run init', () => {
     const config = validConfig();
     delete config.vcs;
@@ -145,10 +156,18 @@ describe('feature name validation', () => {
     expect(isSafeFeatureName('login.fix_1')).toBe(true);
   });
 
+  it('accepts safe slash-separated feature names', () => {
+    expect(isSafeFeatureName('feature/login.fix_1')).toBe(true);
+  });
+
   it('rejects unsafe feature names', () => {
-    expect(isSafeFeatureName('feature/login')).toBe(false);
+    expect(isSafeFeatureName('/feature')).toBe(false);
+    expect(isSafeFeatureName('feature/')).toBe(false);
+    expect(isSafeFeatureName('feature//login')).toBe(false);
+    expect(isSafeFeatureName('feature/../login')).toBe(false);
+    expect(isSafeFeatureName('feature+login')).toBe(false);
     expect(isSafeFeatureName('login;rm')).toBe(false);
     expect(isSafeFeatureName('..')).toBe(false);
-    expect(() => validateFeatureName('feature/login')).toThrow(/Invalid feature name/);
+    expect(() => validateFeatureName('feature+login')).toThrow(/Invalid feature name/);
   });
 });

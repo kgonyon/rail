@@ -75,6 +75,23 @@ describe('JJ operations', () => {
     ]);
   });
 
+  it('normalizes slash-separated feature names for JJ workspace names', async () => {
+    await ops.addJjWorkspace('/repo', '/repo/.trees/feature+demo', '', 'feature/demo', 'main@origin');
+    await ops.removeJjWorkspace('/repo', '/repo/.trees/feature+demo', 'feature/demo');
+
+    expect(calls).toEqual([
+      {
+        cwd: '/repo',
+        args: "workspace add --name feature+demo --revision main@origin '/repo/.trees/feature+demo'",
+      },
+      {
+        cwd: '/repo/.trees/feature+demo',
+        args: 'bookmark create feature/demo --revision @',
+      },
+      { cwd: '/repo', args: 'workspace forget feature+demo' },
+    ]);
+  });
+
   it('fetches target-specific remote bookmark information when possible', async () => {
     await ops.refreshJjParent('/repo', 'main@origin');
     await ops.refreshJjParent('/repo', 'release');
@@ -96,6 +113,14 @@ describe('JJ operations', () => {
     ]);
     expect(removed).toEqual([
       { path: '/repo/.trees/stale', options: { force: true, recursive: true } },
+    ]);
+  });
+
+  it('deletes a bookmark when pruning a JJ feature', async () => {
+    await ops.deleteJjBookmark('/repo', 'feature/demo');
+
+    expect(calls).toEqual([
+      { cwd: '/repo', args: 'bookmark delete -- feature/demo' },
     ]);
   });
 
@@ -136,6 +161,9 @@ describe('JJ operations', () => {
     ]);
     expect(parseJjWorkspaceList('demo: kkmp feature/demo@origin feature/demo* /repo/.trees/demo\n')).toEqual([
       { path: '/repo/.trees/demo', head: 'feature/demo', branch: 'feature/demo', feature: 'demo', displayLabel: 'feature/demo', refLabel: 'Bookmark' },
+    ]);
+    expect(parseJjWorkspaceList('feature+demo: kkmp feature/demo* /repo/.trees/feature+demo\n')).toEqual([
+      { path: '/repo/.trees/feature+demo', head: 'feature/demo', branch: 'feature/demo', feature: 'feature/demo', displayLabel: 'feature/demo', refLabel: 'Bookmark' },
     ]);
   });
 

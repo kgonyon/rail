@@ -40,6 +40,7 @@ rail init                # writes .rail/config.yaml + setup/cleanup scripts
 rail up my-feature       # creates a worktree at trees/my-feature, allocates ports
 rail status              # lists active worktrees with branch, ports, dirty state, PR
 rail down my-feature     # removes the worktree and frees its port slot
+rail down --prune        # also deletes the feature branch/bookmark
 ```
 
 Inside a feature worktree the feature name is auto-detected, so `rail down`
@@ -48,10 +49,11 @@ and `rail run <name>` work without arguments.
 ## Concepts
 
 **Worktrees.** One worktree per feature, created at `<root>/trees/<feature>`
-on branch `feature/<feature>`. The directory and branch prefix are
-configurable in `.rail/config.yaml`. If `.rail/` is not tracked by git, `rail up`
-copies it into the new worktree so feature-scoped commands can still resolve
-scripts from `<worktree>/.rail`.
+on branch `feature/<feature>` by default. Slash-separated feature names are
+normalized for directory names, so `rail up feature/blah` creates
+`trees/feature+blah` while keeping the branch/bookmark name as `feature/blah`.
+The directory and branch prefix are configurable in `.rail/config.yaml`; omit
+`worktrees.branch_prefix` or set it to `""` to use feature names directly.
 
 **Port slots.** Each feature is assigned a slot index, not a fixed port.
 Actual ports are derived as `base + index * per_feature`, so changing
@@ -73,7 +75,7 @@ run with `RAIL_PROJECT`, `RAIL_FEATURE`, `RAIL_FEATURE_DIR`, and
 
 - `rail init` — Initialize a new rail project with boilerplate config and scripts
 - `rail up <feature>` — Create a new feature worktree with port allocation and env setup
-- `rail down [feature]` — Remove a feature worktree and deallocate ports
+- `rail down [feature] [--prune]` — Remove a feature worktree, deallocate ports, and optionally delete its branch/bookmark
 - `rail status` — Show all active feature worktrees with branch, port, and dirty state
 - `rail run <name>` — Run a configured command
 - `rail refresh` — Pull latest changes from the default branch

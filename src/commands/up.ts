@@ -70,7 +70,7 @@ export default defineCommand({
     await vcsDriver.createFeature({
       root,
       path: treePath,
-      branchPrefix: config.worktrees.branch_prefix,
+      branchPrefix: config.worktrees.branch_prefix ?? '',
       feature,
       parentRef,
     });
@@ -90,7 +90,7 @@ export default defineCommand({
 
     await runHooks('up', context);
 
-    printSummary(feature, config.worktrees.branch_prefix, ports, treePath);
+    printSummary(feature, config.worktrees.branch_prefix ?? '', ports, treePath);
   },
 });
 

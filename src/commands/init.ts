@@ -2,7 +2,7 @@ import { defineCommand } from 'citty';
 import consola from 'consola';
 import { basename, isAbsolute, relative, sep, join } from 'path';
 import { existsSync } from 'fs';
-import { mkdir, writeFile, appendFile, readFile, chmod } from 'fs/promises';
+import { mkdir, writeFile, readFile, chmod } from 'fs/promises';
 import { parse, stringify } from 'yaml';
 import { isPlainObject, isSafeParentRefName, validateConfig } from '../lib/config';
 import { getGitRoot, resolveWorktreesDir } from '../lib/paths';
@@ -11,6 +11,28 @@ import type { RailConfig } from '../types/config';
 type VcsChoice = RailConfig['vcs'];
 type ForgeChoice = RailConfig['forge'];
 type IgnoreDestination = RailConfig['setup']['ignore_destination'];
+type IgnoreEntryPredicate = (line: string) => boolean;
+
+const RAIL_LOCAL_HEADER = '# rail local files';
+const TRACKED_RAIL_IGNORE_ENTRIES = ['.rail/local.yaml', '.rail/port_allocations.json'] as const;
+const UNTRACKED_RAIL_IGNORE_ENTRIES = ['.rail/'] as const;
+const BROAD_RAIL_IGNORE_ENTRIES = [
+  '.rail',
+  '.rail/',
+  '.rail/*',
+  '.rail/**',
+  '/.rail',
+  '/.rail/',
+  '/.rail/*',
+  '/.rail/**',
+] as const;
+const BROAD_RAIL_IGNORE_ENTRY_SET = new Set<string>(BROAD_RAIL_IGNORE_ENTRIES);
+const TRACKED_RAIL_IGNORE_ENTRY_SET = new Set<string>([
+  '.rail/local.yaml',
+  '/.rail/local.yaml',
+  '.rail/port_allocations.json',
+  '/.rail/port_allocations.json',
+]);
 
 export interface InitOptions {
   vcs: VcsChoice;
@@ -68,7 +90,8 @@ export default defineCommand({
   async run({ args }) {
     const root = await getGitRoot();
     const projectName = basename(root);
-    const options = await resolveInitOptions(args);
+    const existing = await readExistingConfig(join(root, '.rail', 'config.yaml'));
+    const options = await resolveInitOptions(args, existing);
 
     await initializeRailProject(root, projectName, options);
 
@@ -170,8 +193,12 @@ function repairConfig(
   repaired.worktrees = {
     ...existingWorktrees,
     dir: nonEmptyString(existingWorktrees.dir) ? existingWorktrees.dir : options.worktreesDir,
-    branch_prefix: safeParent(existingWorktrees.branch_prefix) ? existingWorktrees.branch_prefix : 'feature/',
   };
+  if ('branch_prefix' in existingWorktrees) {
+    repaired.worktrees.branch_prefix = safeParent(existingWorktrees.branch_prefix)
+      ? existingWorktrees.branch_prefix
+      : 'feature/';
+  }
 
   const existingPort = isPlainObject(existing.port) ? existing.port : {};
   repaired.port = {
@@ -193,7 +220,7 @@ function nonEmptyString(value: unknown): value is string {
 }
 
 function safeParent(value: unknown): value is string {
-  return typeof value === 'string' && isSafeParentRefName(value);
+  return typeof value === 'string' && (value === '' || isSafeParentRefName(value));
 }
 
 function positiveInteger(value: unknown): value is number {
@@ -225,7 +252,8 @@ worktrees:
   # and ~/... are also supported (useful in .rail/local.yaml to keep
   # worktrees outside the repo).
   dir: ${options.worktreesDir}
-  # Prefix for feature branches (e.g., feature/my-feature)
+  # Optional prefix for feature branches/bookmarks (e.g., feature/my-feature).
+  # Omit this key or set it to "" to use the feature name directly.
   branch_prefix: feature/
 
 port:
@@ -281,28 +309,32 @@ export function defaultInitOptions(overrides: Partial<InitOptions> = {}): InitOp
 }
 
 /** @internal */
-export async function resolveInitOptions(args: Record<string, any>): Promise<InitOptions> {
-  const vcs = await resolveEnumChoice<VcsChoice>('VCS', args.vcs, ['git', 'jj'], 'git');
-  const forge = await resolveEnumChoice<ForgeChoice>(
+export async function resolveInitOptions(
+  args: Record<string, any>,
+  existing: Record<string, any> = {},
+): Promise<InitOptions> {
+  const existingOptions = initOptionValuesFromConfig(existing);
+  const vcs = existingOptions.vcs ?? await resolveEnumChoice<VcsChoice>('VCS', args.vcs, ['git', 'jj'], 'git');
+  const forge = existingOptions.forge ?? await resolveEnumChoice<ForgeChoice>(
     'Forge integration',
     args.forge,
     ['github', 'gitlab', 'none'],
     'github',
   );
-  const defaultParent = args.defaultParent ?? (vcs === 'jj' ? 'main@origin' : 'main');
-  const autoRefresh = await resolveBooleanChoice(
+  const defaultParent = existingOptions.defaultParent ?? args.defaultParent ?? (vcs === 'jj' ? 'main@origin' : 'main');
+  const autoRefresh = existingOptions.autoRefresh ?? resolveBooleanFlag(
     'Automatically refresh parent before creating feature trees?',
     args.autoRefresh,
     args.noAutoRefresh,
     true,
   );
-  const trackRail = await resolveBooleanChoice(
+  const trackRail = existingOptions.trackRail ?? await resolveBooleanChoice(
     'Allow shared .rail config and scripts to be tracked?',
     args.trackRail,
     args.noTrackRail,
     true,
   );
-  const ignoreDestination = await resolveEnumChoice<IgnoreDestination>(
+  const ignoreDestination = existingOptions.ignoreDestination ?? await resolveEnumChoice<IgnoreDestination>(
     'Ignore destination',
     args.ignoreDestination,
     ['gitignore', 'exclude'],
@@ -316,8 +348,28 @@ export async function resolveInitOptions(args: Record<string, any>): Promise<Ini
     autoRefresh,
     trackRail,
     ignoreDestination,
-    worktreesDir: args.worktreesDir ?? 'trees',
+    worktreesDir: existingOptions.worktreesDir ?? args.worktreesDir ?? 'trees',
   };
+}
+
+function initOptionValuesFromConfig(existing: Record<string, any>): Partial<InitOptions> {
+  const existingSetup = isPlainObject(existing.setup) ? existing.setup : {};
+  const existingWorktrees = isPlainObject(existing.worktrees) ? existing.worktrees : {};
+  const options: Partial<InitOptions> = {};
+
+  const vcs = enumValue(existing.vcs, ['git', 'jj']);
+  const forge = enumValue(existing.forge, ['github', 'gitlab', 'none']);
+  const ignoreDestination = enumValue(existingSetup.ignore_destination, ['gitignore', 'exclude']);
+
+  if (vcs) options.vcs = vcs;
+  if (forge) options.forge = forge;
+  if (safeParent(existing.default_parent)) options.defaultParent = existing.default_parent;
+  if (typeof existing.auto_refresh === 'boolean') options.autoRefresh = existing.auto_refresh;
+  if (typeof existingSetup.track_rail === 'boolean') options.trackRail = existingSetup.track_rail;
+  if (ignoreDestination) options.ignoreDestination = ignoreDestination;
+  if (nonEmptyString(existingWorktrees.dir)) options.worktreesDir = existingWorktrees.dir;
+
+  return options;
 }
 
 async function resolveEnumChoice<T extends string>(
@@ -356,6 +408,20 @@ async function resolveBooleanChoice(
   if (!process.stdin.isTTY) return fallback;
 
   return consola.prompt(label, { type: 'confirm', initial: fallback }) as Promise<boolean>;
+}
+
+function resolveBooleanFlag(
+  label: string,
+  value: unknown,
+  negatedValue: unknown,
+  fallback: boolean,
+): boolean {
+  if (value === true && negatedValue === true) {
+    throw new Error(`Choose either the positive or negative ${label} flag, not both`);
+  }
+  if (typeof value === 'boolean') return value;
+  if (negatedValue === true) return false;
+  return fallback;
 }
 
 async function createSetupScript(root: string): Promise<void> {
@@ -448,26 +514,124 @@ export async function updateIgnoreRules(root: string, options: InitOptions): Pro
     await mkdir(join(root, '.git', 'info'), { recursive: true });
   }
 
+  const shouldRemove = options.trackRail ? isBroadRailIgnoreEntry : isTrackedRailIgnoreEntry;
+  await repairObsoleteRailIgnores(root, ignorePath, entries, shouldRemove);
+
   const existing = existsSync(ignorePath)
     ? await readFile(ignorePath, 'utf-8')
     : '';
+  const repaired = normalizeIgnoreContent(existing, entries, shouldRemove, true);
 
-  const existingEntries = new Set(existing.split(/\r?\n/).map((line) => line.trim()));
-  const missing = entries.filter((entry) => !existingEntries.has(entry));
+  if (repaired === existing) return;
 
-  if (missing.length === 0) return;
+  await writeFile(ignorePath, repaired);
+}
 
-  const prefix = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';
-  const block = `${prefix}\n# rail local files\n${missing.join('\n')}\n`;
+async function repairObsoleteRailIgnores(
+  root: string,
+  targetPath: string,
+  entries: string[],
+  shouldRemove: IgnoreEntryPredicate,
+): Promise<void> {
+  const paths = [join(root, '.gitignore'), join(root, '.git', 'info', 'exclude')];
 
-  await appendFile(ignorePath, block);
+  for (const path of paths) {
+    if (path === targetPath || !existsSync(path)) continue;
+    const existing = await readFile(path, 'utf-8');
+    const repaired = normalizeIgnoreContent(existing, entries, shouldRemove, false);
+
+    if (repaired !== existing) await writeFile(path, repaired);
+  }
+}
+
+function normalizeIgnoreContent(
+  existing: string,
+  entries: string[],
+  shouldRemove: IgnoreEntryPredicate,
+  shouldAppendEntries: boolean,
+): string {
+  const desiredEntries = createManagedIgnoreEntrySet(entries);
+  const kept = existing
+    .split(/\r?\n/)
+    .filter((line) => shouldKeepIgnoreLine(line, desiredEntries, shouldRemove));
+  const cleaned = compactBlankLines(kept).join('\n');
+
+  if (!shouldAppendEntries || entries.length === 0) return cleaned ? `${cleaned}\n` : '';
+  if (!cleaned) return `${RAIL_LOCAL_HEADER}\n${entries.join('\n')}\n`;
+
+  return `${cleaned}\n\n${RAIL_LOCAL_HEADER}\n${entries.join('\n')}\n`;
+}
+
+function createManagedIgnoreEntrySet(entries: string[]): Set<string> {
+  const managed = new Set<string>();
+
+  for (const entry of entries) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+
+    managed.add(trimmed);
+    managed.add(`/${trimmed}`);
+
+    if (trimmed.endsWith('/')) {
+      const withoutSlash = trimmed.slice(0, -1);
+      managed.add(withoutSlash);
+      managed.add(`/${withoutSlash}`);
+    }
+  }
+
+  return managed;
+}
+
+function shouldKeepIgnoreLine(
+  line: string,
+  desiredEntries: Set<string>,
+  shouldRemove: IgnoreEntryPredicate,
+): boolean {
+  const trimmed = line.trim();
+
+  if (trimmed === RAIL_LOCAL_HEADER) return false;
+  if (desiredEntries.has(trimmed)) return false;
+  if (shouldRemove(line)) return false;
+
+  return true;
+}
+
+function compactBlankLines(lines: string[]): string[] {
+  const compacted: string[] = [];
+
+  for (const line of lines) {
+    const isBlank = line.trim() === '';
+    if (isBlank && compacted.length === 0) continue;
+    if (isBlank && compacted[compacted.length - 1]?.trim() === '') continue;
+    compacted.push(line);
+  }
+
+  while (compacted[compacted.length - 1]?.trim() === '') compacted.pop();
+
+  return compacted;
+}
+
+function isBroadRailIgnoreEntry(line: string): boolean {
+  const trimmed = line.trim();
+
+  if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('!')) return false;
+
+  return BROAD_RAIL_IGNORE_ENTRY_SET.has(trimmed);
+}
+
+function isTrackedRailIgnoreEntry(line: string): boolean {
+  const trimmed = line.trim();
+
+  if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('!')) return false;
+
+  return TRACKED_RAIL_IGNORE_ENTRY_SET.has(trimmed);
 }
 
 /** @internal */
 export function getIgnoreEntries(root: string, options: InitOptions): string[] {
-  const entries = options.trackRail
-    ? ['.rail/local.yaml', '.rail/port_allocations.json']
-    : ['.rail/'];
+  const entries: string[] = options.trackRail
+    ? [...TRACKED_RAIL_IGNORE_ENTRIES]
+    : [...UNTRACKED_RAIL_IGNORE_ENTRIES];
   const treeDir = getProjectRelativeTreeDir(root, options.worktreesDir);
 
   if (treeDir) entries.push(`${treeDir}/`);

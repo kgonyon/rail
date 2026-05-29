@@ -341,6 +341,16 @@ describe('feature display helpers', () => {
     expect(getFeatureDisplayName(feature)).toBe('demo');
     expect(getFeatureRefDisplay(feature)).toEqual({ label: 'Branch', value: 'feature/demo' });
   });
+
+  it('decodes normalized slash-separated feature directory names for display', () => {
+    const feature: WorktreeInfo = {
+      path: '/repo/.trees/feature+demo',
+      head: 'abc',
+      branch: 'refs/heads/feature/demo',
+    };
+
+    expect(getFeatureDisplayName(feature)).toBe('feature/demo');
+  });
 });
 
 describe('collectStats', () => {

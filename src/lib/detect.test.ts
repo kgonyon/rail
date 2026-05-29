@@ -14,6 +14,12 @@ describe('detectFeatureFromCwd', () => {
     ).toBe('feat');
   });
 
+  it('reverses normalized slash-separated feature directory names', () => {
+    expect(
+      detectFeatureFromCwd('/projects/app/.trees/feature+blah/src/lib', '/projects/app/.trees'),
+    ).toBe('feature/blah');
+  });
+
   it('returns null when cwd is not inside trees dir', () => {
     expect(
       detectFeatureFromCwd('/projects/app/src', '/projects/app/.trees'),
@@ -64,6 +70,10 @@ describe('detectFeatureFromCwd', () => {
 describe('resolveFeature', () => {
   it('returns provided feature directly', () => {
     expect(resolveFeature('my-feature', '/projects/app/.trees')).toBe('my-feature');
+  });
+
+  it('returns provided slash-separated feature names directly', () => {
+    expect(resolveFeature('feature/blah', '/projects/app/.trees')).toBe('feature/blah');
   });
 
   it('throws with command name when no feature and auto-detect fails', () => {

@@ -2,6 +2,7 @@ import { rm } from 'fs/promises';
 import consola from 'consola';
 import { basename } from 'path';
 import { isSafeParentRefName, validateFeatureName } from './config';
+import { getFeatureDirName, getFeatureNameFromDirName } from './paths';
 import { jjExec } from './shell';
 import type { WorktreeInfo, WorktreeStats } from './git';
 
@@ -42,6 +43,10 @@ export async function addJjWorkspace(
 
 export async function removeJjWorkspace(root: string, treePath: string, feature: string): Promise<void> {
   return createJjOperations().removeJjWorkspace(root, treePath, feature);
+}
+
+export async function deleteJjBookmark(root: string, bookmark: string): Promise<void> {
+  return createJjOperations().deleteJjBookmark(root, bookmark);
 }
 
 export async function listJjWorkspaces(root: string): Promise<WorktreeInfo[]> {
@@ -85,11 +90,12 @@ export function createJjOperations(deps: JjOperationsDependencies = { jjExec, rm
     ): Promise<void> {
       const parent = parentRef ?? '@';
       const bookmark = `${bookmarkPrefix}${feature}`;
+      const workspaceName = getFeatureDirName(feature);
       validateFeatureName(feature);
       validateJjRef(parent, 'parent ref');
       validateJjRef(bookmark, 'bookmark');
 
-      await deps.jjExec(root, `workspace add --name ${feature} --revision ${parent} ${shellQuote(treePath)}`);
+      await deps.jjExec(root, `workspace add --name ${workspaceName} --revision ${parent} ${shellQuote(treePath)}`);
 
       try {
         await deps.jjExec(treePath, `bookmark create ${bookmark} --revision @`);
@@ -100,11 +106,17 @@ export function createJjOperations(deps: JjOperationsDependencies = { jjExec, rm
 
     async removeJjWorkspace(root: string, treePath: string, feature: string): Promise<void> {
       validateFeatureName(feature);
+      const workspaceName = getFeatureDirName(feature);
       try {
-        await deps.jjExec(root, `workspace forget ${feature}`);
+        await deps.jjExec(root, `workspace forget ${workspaceName}`);
       } catch {
         await deps.rm(treePath, { force: true, recursive: true });
       }
+    },
+
+    async deleteJjBookmark(root: string, bookmark: string): Promise<void> {
+      validateJjRef(bookmark, 'bookmark');
+      await deps.jjExec(root, `bookmark delete -- ${bookmark}`);
     },
 
     async listJjWorkspaces(root: string): Promise<WorktreeInfo[]> {
@@ -157,7 +169,7 @@ function parseJjWorkspaceLine(line: string): WorktreeInfo {
     path,
     head: label,
     branch: label,
-    feature: basename(path),
+    feature: getFeatureNameFromDirName(basename(path)),
     displayLabel: label,
     refLabel: 'Bookmark',
   };

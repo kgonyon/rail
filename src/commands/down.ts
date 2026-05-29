@@ -22,6 +22,10 @@ export default defineCommand({
       description: 'Feature name (auto-detected if inside a worktree)',
       required: false,
     },
+    prune: {
+      type: 'boolean',
+      description: 'Delete the feature branch or bookmark after removing the worktree',
+    },
   },
   async run({ args }) {
     const root = await gitVcsDriver.resolveProjectRoot();
@@ -62,6 +66,11 @@ export default defineCommand({
 
     deallocatePorts(root, feature);
     consola.info('Deallocated ports');
+
+    if (args.prune) {
+      await vcsDriver.pruneFeature(root, config.worktrees.branch_prefix ?? '', feature);
+      consola.info('Pruned feature ref');
+    }
 
     consola.success(`Feature "${feature}" has been removed`);
   },

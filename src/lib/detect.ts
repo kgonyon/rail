@@ -1,4 +1,5 @@
 import { validateFeatureName } from './config';
+import { getFeatureNameFromDirName } from './paths';
 
 export function detectFeatureFromCwd(cwd: string, treesDir: string): string | null {
   const normalized = cwd.replace(/\\/g, '/');
@@ -8,7 +9,8 @@ export function detectFeatureFromCwd(cwd: string, treesDir: string): string | nu
   if (!normalized.startsWith(prefix)) return null;
 
   const afterTrees = normalized.slice(prefix.length);
-  const feature = afterTrees.split('/')[0];
+  const featureDirName = afterTrees.split('/')[0];
+  const feature = featureDirName ? getFeatureNameFromDirName(featureDirName) : '';
 
   return feature || null;
 }

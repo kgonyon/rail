@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import consola from 'consola';
 import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -25,6 +26,36 @@ afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+async function withInteractivePrompts<T>(
+  responses: unknown[],
+  action: () => Promise<T>,
+): Promise<{ result: T; prompts: string[] }> {
+  const originalPrompt = consola.prompt;
+  const stdin = process.stdin as Omit<typeof process.stdin, 'isTTY'> & { isTTY?: boolean };
+  const ttyDescriptor = Object.getOwnPropertyDescriptor(stdin, 'isTTY');
+  const prompts: string[] = [];
+  let responseIndex = 0;
+
+  Object.defineProperty(stdin, 'isTTY', { configurable: true, value: true });
+  consola.prompt = ((message: string) => {
+    prompts.push(message);
+    const response = responses[responseIndex];
+    responseIndex += 1;
+    return Promise.resolve(response);
+  }) as typeof consola.prompt;
+
+  try {
+    return { result: await action(), prompts };
+  } finally {
+    consola.prompt = originalPrompt;
+    if (ttyDescriptor) {
+      Object.defineProperty(stdin, 'isTTY', ttyDescriptor);
+    } else {
+      delete stdin.isTTY;
+    }
+  }
+}
 
 describe('buildConfigContent', () => {
   it('generates a valid Git default config', () => {
@@ -87,6 +118,75 @@ describe('resolveInitOptions', () => {
     expect(options).toEqual({
       vcs: 'jj',
       forge: 'none',
+      defaultParent: 'main@origin',
+      autoRefresh: false,
+      trackRail: false,
+      ignoreDestination: 'exclude',
+      worktreesDir: '../feature-trees',
+    });
+  });
+
+  it('does not prompt for auto-refresh during interactive setup', async () => {
+    const { result, prompts } = await withInteractivePrompts(
+      ['git', 'github', true, 'gitignore'],
+      () => resolveInitOptions({}),
+    );
+
+    expect(result.autoRefresh).toBe(true);
+    expect(prompts).toEqual([
+      'Choose VCS',
+      'Choose Forge integration',
+      'Allow shared .rail config and scripts to be tracked?',
+      'Choose Ignore destination',
+    ]);
+  });
+
+  it('uses valid existing config values without prompting', async () => {
+    const existing = parse(`vcs: jj
+forge: gitlab
+default_parent: trunk@origin
+auto_refresh: false
+setup:
+  track_rail: false
+  ignore_destination: exclude
+worktrees:
+  dir: ../feature-trees
+`);
+
+    const { result, prompts } = await withInteractivePrompts([], () => resolveInitOptions({}, existing));
+
+    expect(prompts).toEqual([]);
+    expect(result).toEqual({
+      vcs: 'jj',
+      forge: 'gitlab',
+      defaultParent: 'trunk@origin',
+      autoRefresh: false,
+      trackRail: false,
+      ignoreDestination: 'exclude',
+      worktreesDir: '../feature-trees',
+    });
+  });
+
+  it('prompts only for values missing from existing config', async () => {
+    const existing = parse(`vcs: jj
+auto_refresh: false
+worktrees:
+  dir: ../feature-trees
+`);
+
+    const { result, prompts } = await withInteractivePrompts(
+      ['gitlab', false, 'exclude'],
+      () => resolveInitOptions({}, existing),
+    );
+
+    expect(prompts).toEqual([
+      'Choose Forge integration',
+      'Allow shared .rail config and scripts to be tracked?',
+      'Choose Ignore destination',
+    ]);
+    expect(result).toEqual({
+      vcs: 'jj',
+      forge: 'gitlab',
       defaultParent: 'main@origin',
       autoRefresh: false,
       trackRail: false,
@@ -294,6 +394,130 @@ port:
     expect(gitignore.match(/\.rail\/local\.yaml/g)?.length).toBe(1);
     expect(gitignore.match(/\.rail\/port_allocations\.json/g)?.length).toBe(1);
     expect(gitignore.match(/^trees\/$/gm)?.length).toBe(1);
+  });
+
+  it('removes broad rail ignores when shared rail files should be tracked', async () => {
+    const root = makeTempRoot();
+    mkdirSync(join(root, '.rail'), { recursive: true });
+    writeFileSync(join(root, '.rail', 'config.yaml'), buildConfigContent('test-project'));
+    writeFileSync(join(root, '.gitignore'), '# existing\n.rail/\n/.rail\n.rail/**\nnode_modules/\n');
+
+    await initializeRailProject(root, 'test-project');
+
+    const gitignore = readFileSync(join(root, '.gitignore'), 'utf-8');
+    const lines = gitignore.split(/\r?\n/).map((line) => line.trim());
+
+    expect(lines).not.toContain('.rail/');
+    expect(lines).not.toContain('/.rail');
+    expect(lines).not.toContain('.rail/**');
+    expect(lines).toContain('node_modules/');
+    expect(lines).toContain('.rail/local.yaml');
+    expect(lines).toContain('.rail/port_allocations.json');
+  });
+
+  it('repairs broad gitignore rail ignores when local ignores go to exclude', async () => {
+    const root = makeTempRoot();
+    mkdirSync(join(root, '.rail'), { recursive: true });
+    writeFileSync(join(root, '.rail', 'config.yaml'), buildConfigContent(
+      'test-project',
+      defaultInitOptions({ ignoreDestination: 'exclude' }),
+    ));
+    writeFileSync(join(root, '.gitignore'), '# existing\n.rail/\nnode_modules/\n');
+
+    await initializeRailProject(root, 'test-project');
+
+    const gitignore = readFileSync(join(root, '.gitignore'), 'utf-8');
+    const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf-8');
+    const gitignoreLines = gitignore.split(/\r?\n/).map((line) => line.trim());
+
+    expect(gitignoreLines).not.toContain('.rail/');
+    expect(gitignoreLines).toContain('node_modules/');
+    expect(exclude).toContain('.rail/local.yaml');
+    expect(exclude).toContain('.rail/port_allocations.json');
+  });
+
+  it('removes narrow rail ignores when shared rail files should not be tracked', async () => {
+    const root = makeTempRoot();
+    mkdirSync(join(root, '.rail'), { recursive: true });
+    writeFileSync(join(root, '.rail', 'config.yaml'), buildConfigContent(
+      'test-project',
+      defaultInitOptions({ trackRail: false }),
+    ));
+    writeFileSync(
+      join(root, '.gitignore'),
+      '# existing\n.rail/local.yaml\n.rail/port_allocations.json\ntrees/\nnode_modules/\n',
+    );
+
+    await initializeRailProject(root, 'test-project');
+
+    const gitignore = readFileSync(join(root, '.gitignore'), 'utf-8');
+    const lines = gitignore.split(/\r?\n/).map((line) => line.trim());
+
+    expect(lines).not.toContain('.rail/local.yaml');
+    expect(lines).not.toContain('.rail/port_allocations.json');
+    expect(lines).toContain('.rail/');
+    expect(lines).toContain('trees/');
+    expect(lines).toContain('node_modules/');
+    expect(gitignore.match(/^\.rail\/$/gm)?.length).toBe(1);
+  });
+
+  it('consolidates duplicate rail local blocks', async () => {
+    const root = makeTempRoot();
+    mkdirSync(join(root, '.rail'), { recursive: true });
+    writeFileSync(join(root, '.rail', 'config.yaml'), buildConfigContent(
+      'test-project',
+      defaultInitOptions({ trackRail: false }),
+    ));
+    writeFileSync(join(root, '.gitignore'), `node_modules/
+
+# rail local files
+trees/
+
+# rail local files
+
+# rail local files
+.rail/
+`);
+
+    await initializeRailProject(root, 'test-project');
+
+    const gitignore = readFileSync(join(root, '.gitignore'), 'utf-8');
+
+    expect(gitignore).toBe(`node_modules/
+
+# rail local files
+.rail/
+trees/
+`);
+  });
+
+  it('removes managed rail entries from exclude when moving ignores to gitignore', async () => {
+    const root = makeTempRoot();
+    mkdirSync(join(root, '.rail'), { recursive: true });
+    mkdirSync(join(root, '.git', 'info'), { recursive: true });
+    writeFileSync(join(root, '.rail', 'config.yaml'), buildConfigContent('test-project'));
+    writeFileSync(join(root, '.git', 'info', 'exclude'), `*.local
+
+# rail local files
+.rail/local.yaml
+.rail/port_allocations.json
+/trees
+`);
+
+    await initializeRailProject(root, 'test-project');
+
+    const gitignore = readFileSync(join(root, '.gitignore'), 'utf-8');
+    const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf-8');
+    const excludeLines = exclude.split(/\r?\n/).map((line) => line.trim());
+
+    expect(gitignore).toContain('.rail/local.yaml');
+    expect(gitignore).toContain('.rail/port_allocations.json');
+    expect(gitignore).toContain('trees/');
+    expect(excludeLines).toContain('*.local');
+    expect(excludeLines).not.toContain('# rail local files');
+    expect(excludeLines).not.toContain('.rail/local.yaml');
+    expect(excludeLines).not.toContain('.rail/port_allocations.json');
+    expect(excludeLines).not.toContain('/trees');
   });
 });
 

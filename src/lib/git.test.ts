@@ -1,4 +1,5 @@
 import { beforeEach, describe, it, expect, mock } from 'bun:test';
+import { $ } from 'bun';
 
 /**
  * Mock handlers for gitExec / ghExec from ./shell.
@@ -20,6 +21,17 @@ mock.module('./shell', () => ({
     ghExecCalls.push({ cwd, args });
     return ghExecHandler(cwd, args);
   },
+  throwFormattedShellError: (err: unknown): never => {
+    if (err instanceof $.ShellError) {
+      const parts = [err.message];
+      const stderr = err.stderr.toString('utf8').trim();
+      const stdout = err.stdout.toString('utf8').trim();
+      if (stderr) parts.push(stderr);
+      if (stdout) parts.push(stdout);
+      throw new Error(parts.join('\n'));
+    }
+    throw err;
+  },
 }));
 
 import {
@@ -36,6 +48,7 @@ import {
   parseGhPrListJson,
   refreshFromOrigin,
   fetchFromOrigin,
+  deleteBranch,
   __resetGhAvailableCache,
 } from './git';
 
@@ -513,6 +526,28 @@ describe('isSafeRefName', () => {
 
   it('accepts a name exactly 255 characters', () => {
     expect(isSafeRefName('a'.repeat(255))).toBe(true);
+  });
+});
+
+describe('deleteBranch', () => {
+  it('deletes a safe local branch with an option terminator', async () => {
+    const calls: Array<{ root: string; args: string }> = [];
+    gitExecHandler = (root, args) => {
+      calls.push({ root, args });
+      return Promise.resolve('');
+    };
+
+    await deleteBranch('/repo', 'feature/demo');
+
+    expect(calls).toEqual([
+      { root: '/repo', args: 'branch -D -- feature/demo' },
+    ]);
+  });
+
+  it('rejects unsafe branch names before invoking git', async () => {
+    gitExecHandler = () => Promise.reject(new Error('should not run'));
+
+    await expect(deleteBranch('/repo', 'feature/demo;rm')).rejects.toThrow(/Unsafe branch ref/);
   });
 });
 

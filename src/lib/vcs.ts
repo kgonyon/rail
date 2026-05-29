@@ -1,5 +1,6 @@
 import {
   addWorktree,
+  deleteBranch,
   fetchFromOrigin,
   getDefaultBranch,
   getWorktreeStats,
@@ -9,6 +10,7 @@ import {
 } from './git';
 import {
   addJjWorkspace,
+  deleteJjBookmark,
   fetchJjParent,
   getJjWorkspaceStats,
   listJjWorkspaces,
@@ -38,6 +40,7 @@ export interface VcsDriver {
   fetchParent(root: string, parentRef: string): Promise<string>;
   createFeature(options: CreateFeatureOptions): Promise<void>;
   removeFeature(root: string, path: string, feature: string): Promise<void>;
+  pruneFeature(root: string, branchPrefix: string, feature: string): Promise<void>;
   listFeatures(root: string): Promise<VcsFeature[]>;
   getLocalFeatureStatus(
     path: string,
@@ -52,6 +55,7 @@ interface GitVcsDriverDependencies {
   refreshFromOrigin: typeof refreshFromOrigin;
   fetchFromOrigin: typeof fetchFromOrigin;
   addWorktree: typeof addWorktree;
+  deleteBranch: typeof deleteBranch;
   removeWorktree: typeof removeWorktree;
   listWorktrees: typeof listWorktrees;
   getWorktreeStats: typeof getWorktreeStats;
@@ -63,6 +67,7 @@ interface JjVcsDriverDependencies {
   refreshJjParent: typeof refreshJjParent;
   fetchJjParent: typeof fetchJjParent;
   addJjWorkspace: typeof addJjWorkspace;
+  deleteJjBookmark: typeof deleteJjBookmark;
   removeJjWorkspace: typeof removeJjWorkspace;
   listJjWorkspaces: typeof listJjWorkspaces;
   getJjWorkspaceStats: typeof getJjWorkspaceStats;
@@ -91,6 +96,9 @@ export function createGitVcsDriver(deps: GitVcsDriverDependencies): VcsDriver {
     },
     removeFeature(root, path) {
       return deps.removeWorktree(root, path);
+    },
+    pruneFeature(root, branchPrefix, feature) {
+      return deps.deleteBranch(root, `${branchPrefix}${feature}`);
     },
     listFeatures(root) {
       return deps.listWorktrees(root);
@@ -127,6 +135,9 @@ export function createJjVcsDriver(deps: JjVcsDriverDependencies): VcsDriver {
     removeFeature(root, path, feature) {
       return deps.removeJjWorkspace(root, path, feature);
     },
+    pruneFeature(root, branchPrefix, feature) {
+      return deps.deleteJjBookmark(root, `${branchPrefix}${feature}`);
+    },
     listFeatures(root) {
       return deps.listJjWorkspaces(root);
     },
@@ -143,6 +154,7 @@ export const gitVcsDriver: VcsDriver = createGitVcsDriver({
   refreshFromOrigin,
   fetchFromOrigin,
   addWorktree,
+  deleteBranch,
   removeWorktree,
   listWorktrees,
   getWorktreeStats,
@@ -154,6 +166,7 @@ export const jjVcsDriver: VcsDriver = createJjVcsDriver({
   refreshJjParent,
   fetchJjParent,
   addJjWorkspace,
+  deleteJjBookmark,
   removeJjWorkspace,
   listJjWorkspaces,
   getJjWorkspaceStats,

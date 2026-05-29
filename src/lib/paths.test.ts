@@ -2,6 +2,9 @@ import { describe, it, expect } from 'bun:test';
 import { join } from 'path';
 import { homedir } from 'os';
 import {
+  getGitRoot,
+  getFeatureDirName,
+  getFeatureNameFromDirName,
   getWorktreePath,
   findRailProjectRoot,
   getConfigPath,
@@ -28,6 +31,19 @@ describe('getWorktreePath', () => {
       join('/Users/me/.rail/repos/app', 'feat'),
     );
   });
+
+  it('normalizes slash-separated feature names for directory paths', () => {
+    expect(getWorktreePath('/projects/app/.trees', 'feature/blah')).toBe(
+      join('/projects/app/.trees', 'feature+blah'),
+    );
+  });
+});
+
+describe('feature directory names', () => {
+  it('converts slash-separated feature names to reversible directory names', () => {
+    expect(getFeatureDirName('feature/blah')).toBe('feature+blah');
+    expect(getFeatureNameFromDirName('feature+blah')).toBe('feature/blah');
+  });
 });
 
 describe('findRailProjectRoot', () => {
@@ -41,6 +57,33 @@ describe('findRailProjectRoot', () => {
     try {
       expect(findRailProjectRoot(featureDir)).toBe(root);
     } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+});
+
+describe('getGitRoot', () => {
+  it('includes VCS command output when root detection fails', async () => {
+    const root = join(tmpdir(), `rail-root-error-${Date.now()}-${Math.random()}`);
+    const originalCwd = process.cwd();
+    mkdirSync(root, { recursive: true });
+
+    try {
+      process.chdir(root);
+      let caught: unknown;
+      try {
+        await getGitRoot();
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(caught).toBeInstanceOf(Error);
+      const message = (caught as Error).message;
+      expect(message).toContain('Not inside a git or jj repository');
+      expect(message).toContain('git common dir failed:');
+      expect(message).toContain('Failed with exit code');
+    } finally {
+      process.chdir(originalCwd);
       rmSync(root, { force: true, recursive: true });
     }
   });

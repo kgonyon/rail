@@ -62,10 +62,6 @@ const deps = {
       openPrs: { state: 'unavailable' as const },
     });
   },
-  isGhAvailable: () => {
-    calls.push({ name: 'isGhAvailable', args: [] });
-    return Promise.resolve(true);
-  },
 };
 
 const driver = createGitVcsDriver(deps);
@@ -118,11 +114,10 @@ describe('createGitVcsDriver', () => {
     ]);
   });
 
-  it('returns default parent, local status, and PR provider availability', async () => {
+  it('returns default parent and local status without forge provider behavior', async () => {
     const statusOptions = {
       defaultBranch: 'main',
       branch: 'refs/heads/feature/demo',
-      ghAvailable: true,
     };
 
     await expect(driver.getDefaultParent('/repo')).resolves.toBe('main');
@@ -132,12 +127,10 @@ describe('createGitVcsDriver', () => {
       stagedFiles: 1,
       commitsAhead: 3,
     });
-    await expect(driver.isPullRequestProviderAvailable()).resolves.toBe(true);
 
     expect(calls).toEqual([
       { name: 'getDefaultBranch', args: ['/repo'] },
       { name: 'getWorktreeStats', args: ['/repo/.trees/demo', statusOptions] },
-      { name: 'isGhAvailable', args: [] },
     ]);
   });
 });

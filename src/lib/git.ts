@@ -1,6 +1,12 @@
 import { $ } from 'bun';
 import consola from 'consola';
-import { ghExec, gitExec } from './shell';
+import { gitExec } from './shell';
+export {
+  __resetGhAvailableCache,
+  isGhAvailable,
+  parseGhPrListJson,
+} from './forge';
+import { listOpenGitHubReviews } from './forge';
 
 export interface WorktreeInfo {
   path: string;
@@ -223,110 +229,18 @@ const CLEAN_STATS: WorktreeStats = {
 
 const DEFAULT_BRANCH_FALLBACK = 'main';
 const ORIGIN_HEAD_PREFIX = 'refs/remotes/origin/';
-
-let ghAvailableCache: boolean | null = null;
-
 /**
- * Probe `gh auth status` once per process to determine if `gh` is installed and
- * authenticated. Subsequent calls return the cached boolean.
- */
-export async function isGhAvailable(): Promise<boolean> {
-  if (ghAvailableCache !== null) return ghAvailableCache;
-  try {
-    await ghExec(process.cwd(), 'auth status');
-    ghAvailableCache = true;
-  } catch {
-    ghAvailableCache = false;
-  }
-  return ghAvailableCache;
-}
-
-/** Reset the cached `gh` availability — for tests only. */
-export function __resetGhAvailableCache(): void {
-  ghAvailableCache = null;
-}
-
-const MAX_OPEN_PRS = 50;
-
-/**
- * Parse JSON output from `gh pr list --json number,url`.
- * Returns an array of `OpenPrInfo` for valid entries; returns `null` on
- * parse-level failure or non-array result. Malformed individual entries
- * (missing fields, bad types, non-positive numbers, unsafe URLs) are dropped.
- * Caps the result at `MAX_OPEN_PRS` valid entries; any beyond that are
- * silently dropped to keep terminal output bounded.
- */
-export function parseGhPrListJson(output: string): OpenPrInfo[] | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(output);
-  } catch {
-    return null;
-  }
-  if (!Array.isArray(parsed)) return null;
-  const prs: OpenPrInfo[] = [];
-  for (const entry of parsed) {
-    const info = toOpenPrInfo(entry);
-    if (info !== null) prs.push(info);
-  }
-  return prs.slice(0, MAX_OPEN_PRS);
-}
-
-const URL_MAX_LENGTH = 2048;
-const URL_PREFIX = 'https://';
-
-/**
- * Defense-in-depth: validate a PR URL parsed from `gh` JSON before letting it
- * flow to terminal output. Rejects non-https schemes, control characters
- * (ANSI escapes, CR/LF, BS, DEL), and oversized strings.
- */
-function isSafePrUrl(url: string): boolean {
-  if (url.length === 0 || url.length > URL_MAX_LENGTH) return false;
-  if (!url.startsWith(URL_PREFIX)) return false;
-  for (let i = 0; i < url.length; i++) {
-    const code = url.charCodeAt(i);
-    if (code < 0x20 || code === 0x7f) return false;
-  }
-  return true;
-}
-
-function toOpenPrInfo(entry: unknown): OpenPrInfo | null {
-  if (typeof entry !== 'object' || entry === null) return null;
-  const record = entry as Record<string, unknown>;
-  const num = record.number;
-  const url = record.url;
-  if (typeof num !== 'number' || !Number.isInteger(num) || num <= 0) return null;
-  if (typeof url !== 'string' || !isSafePrUrl(url)) return null;
-  return { number: num, url };
-}
-
-const REFS_HEADS_PREFIX = 'refs/heads/';
-
-/**
- * List open PRs whose HEAD is `branch` via `gh pr list --json number,url`.
- * Strips a leading `refs/heads/` from `branch` before invoking gh.
- * Returns `{ state: 'error' }` on subprocess failure, parse failure, or
- * unsafe ref name; `{ state: 'ok', prs }` otherwise.
+ * Compatibility wrapper for GitHub PR lookup. New status code goes through the
+ * forge driver, but Git status tests and older internals still exercise this
+ * bounded parser path directly.
  */
 export async function getOpenPrs(
   treePath: string,
   branch: string,
 ): Promise<OpenPrsResult> {
-  const normalized = branch.startsWith(REFS_HEADS_PREFIX)
-    ? branch.slice(REFS_HEADS_PREFIX.length)
-    : branch;
-  if (!isSafeRefName(normalized)) return { state: 'error' };
-  try {
-    const out = await ghExec(
-      treePath,
-      `pr list --head ${normalized} --state open --json number,url`,
-    );
-    const prs = parseGhPrListJson(out);
-    if (prs === null) return { state: 'error' };
-    return { state: 'ok', prs };
-  } catch {
-    return { state: 'error' };
-  }
+  const result = await listOpenGitHubReviews(treePath, branch);
+  if (result.state !== 'ok') return result;
+  return { state: 'ok', prs: result.reviews };
 }
 
 /**
@@ -410,7 +324,6 @@ async function pullCurrentBranch(root: string, branch: string): Promise<void> {
   const { isDirty } = await getWorktreeStats(root, {
     defaultBranch: branch,
     branch,
-    ghAvailable: false,
   });
   if (isDirty) {
     throw new Error(
@@ -501,7 +414,6 @@ async function fetchRemoteRef(root: string, remote: string, ref: string): Promis
 export interface WorktreeStatsOptions {
   defaultBranch: string;
   branch: string;
-  ghAvailable: boolean;
 }
 
 const COMMITS_AHEAD_FAILURE = -1;
@@ -514,16 +426,13 @@ export async function getWorktreeStats(
   try {
     porcelainOutput = await gitExec(treePath, 'status --porcelain');
   } catch {
-    const openPrs: OpenPrsResult = options.ghAvailable
-      ? { state: 'ok', prs: [] }
-      : { state: 'unavailable' };
-    return { ...CLEAN_STATS, openPrs };
+    return { ...CLEAN_STATS, openPrs: { state: 'unavailable' } };
   }
 
   const breakdown = parsePorcelainStatusBreakdown(porcelainOutput);
   const isDirty = breakdown.total > 0;
   const commitsAhead = await fetchCommitsAhead(treePath, options);
-  const openPrs = await fetchOpenPrs(treePath, options);
+  const openPrs: OpenPrsResult = { state: 'unavailable' };
 
   if (!isDirty) {
     return { ...CLEAN_STATS, commitsAhead, openPrs };
@@ -541,14 +450,6 @@ export async function getWorktreeStats(
     commitsAhead,
     openPrs,
   };
-}
-
-async function fetchOpenPrs(
-  treePath: string,
-  options: WorktreeStatsOptions,
-): Promise<OpenPrsResult> {
-  if (!options.ghAvailable) return { state: 'unavailable' };
-  return getOpenPrs(treePath, options.branch);
 }
 
 async function fetchCommitsAhead(

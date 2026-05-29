@@ -21,6 +21,14 @@ export async function ghExec(cwd: string, args: string): Promise<string> {
   return result.text();
 }
 
+/**
+ * Run a `jj` command quietly with a specific working directory, returning stdout text.
+ */
+export async function jjExec(cwd: string, args: string): Promise<string> {
+  const result = await $`jj ${{ raw: args }}`.cwd(cwd).quiet();
+  return result.text();
+}
+
 const SHELL_STREAM_MAX_CHARS = 4000;
 
 /**

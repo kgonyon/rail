@@ -4,7 +4,7 @@ import consola from 'consola';
 import { getWorktreePath } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { loadPortAllocations, getPortsForFeature, deallocatePorts } from '../lib/ports';
-import { gitVcsDriver } from '../lib/vcs';
+import { getVcsDriver, gitVcsDriver } from '../lib/vcs';
 import { resolveFeature } from '../lib/detect';
 import { runHooks } from '../lib/hooks';
 import { runScript } from '../lib/script';
@@ -26,6 +26,7 @@ export default defineCommand({
   async run({ args }) {
     const root = await gitVcsDriver.resolveProjectRoot();
     const config = loadConfig(root);
+    const vcsDriver = getVcsDriver(config.vcs);
 
     const feature = resolveFeature(args.feature as string | undefined, config.worktrees.dir);
     const treePath = getWorktreePath(config.worktrees.dir, feature);
@@ -56,7 +57,7 @@ export default defineCommand({
       await runScript(config.scripts.cleanup, context);
     }
 
-    await gitVcsDriver.removeFeature(root, treePath);
+    await vcsDriver.removeFeature(root, treePath);
     consola.info('Removed worktree');
 
     deallocatePorts(root, feature);

@@ -1,12 +1,13 @@
 import { defineCommand } from 'citty';
 import consola from 'consola';
 import { join } from 'path';
-import { getProjectRoot, getWorktreePath, resolveRelativePath } from '../lib/paths';
+import { getWorktreePath, resolveRelativePath } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { loadPortAllocations, getPortsForFeature } from '../lib/ports';
 import { resolveFeature } from '../lib/detect';
 import { runHooks } from '../lib/hooks';
 import { runCommand } from '../lib/script';
+import { gitVcsDriver } from '../lib/vcs';
 import type { ScriptContext } from '../lib/script';
 import type { RailConfig, CommandConfig } from '../types/config';
 
@@ -28,7 +29,7 @@ export default defineCommand({
     },
   },
   async run({ args, rawArgs }) {
-    const root = await getProjectRoot();
+    const root = await gitVcsDriver.resolveProjectRoot();
     const config = loadConfig(root);
     const cmdConfig = findCommand(config, args.command);
     const scope = cmdConfig.scope ?? 'feature';

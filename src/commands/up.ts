@@ -1,10 +1,10 @@
 import { defineCommand } from 'citty';
 import consola from 'consola';
-import { getProjectRoot, getWorktreePath } from '../lib/paths';
+import { getWorktreePath } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { validateFeatureName } from '../lib/config';
 import { allocatePorts, getPortsForFeature } from '../lib/ports';
-import { addWorktree, fetchFromOrigin } from '../lib/git';
+import { gitVcsDriver } from '../lib/vcs';
 import { generateEnvFiles } from '../lib/env';
 import { runHooks } from '../lib/hooks';
 import { runScript } from '../lib/script';
@@ -24,11 +24,11 @@ export default defineCommand({
   },
   async run({ args }) {
     const feature = args.feature;
-    const root = await getProjectRoot();
+    const root = await gitVcsDriver.resolveProjectRoot();
     const config = loadConfig(root);
     validateFeatureName(feature);
 
-    const defaultBranch = await fetchFromOrigin(root);
+    const defaultBranch = await gitVcsDriver.fetchParent(root);
 
     const index = allocatePorts(root, feature, config.port);
     const ports = getPortsForFeature(config.port, index);
@@ -45,13 +45,13 @@ export default defineCommand({
 
     consola.start(`Setting up feature: ${feature}`);
 
-    await addWorktree(
+    await gitVcsDriver.createFeature({
       root,
-      treePath,
-      config.worktrees.branch_prefix,
+      path: treePath,
+      branchPrefix: config.worktrees.branch_prefix,
       feature,
-      `origin/${defaultBranch}`,
-    );
+      parentRef: `origin/${defaultBranch}`,
+    });
     consola.info(`Created worktree at ${treePath}`);
 
     consola.info(`Allocated ports: ${ports.join(', ')}`);

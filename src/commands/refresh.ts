@@ -1,6 +1,5 @@
 import { defineCommand } from 'citty';
-import { getProjectRoot } from '../lib/paths';
-import { refreshFromOrigin } from '../lib/git';
+import { gitVcsDriver } from '../lib/vcs';
 
 export default defineCommand({
   meta: {
@@ -8,7 +7,7 @@ export default defineCommand({
     description: 'Pull latest changes from the default branch',
   },
   async run() {
-    const root = await getProjectRoot();
-    await refreshFromOrigin(root);
+    const root = await gitVcsDriver.resolveProjectRoot();
+    await gitVcsDriver.refreshParent(root);
   },
 });

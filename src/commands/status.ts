@@ -2,11 +2,11 @@ import { defineCommand } from 'citty';
 import consola from 'consola';
 import { basename } from 'path';
 import { isatty } from 'tty';
-import { getGitRoot, isRailProject } from '../lib/paths';
+import { isRailProject } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { loadPortAllocations, getPortsForFeature } from '../lib/ports';
-import { listWorktrees, getWorktreeStats, getDefaultBranch, isGhAvailable } from '../lib/git';
-import type { WorktreeInfo, WorktreeStats } from '../lib/git';
+import { gitVcsDriver } from '../lib/vcs';
+import type { VcsFeature, VcsFeatureStatus } from '../lib/vcs';
 import type { PortAllocations, RailConfig } from '../types/config';
 
 export default defineCommand({
@@ -15,7 +15,7 @@ export default defineCommand({
     description: 'Show all active feature worktrees with branch, port, and dirty state',
   },
   async run() {
-    const root = await getGitRoot();
+    const root = await gitVcsDriver.resolveRoot();
 
     if (!isRailProject(root)) {
       consola.warn('Not a rail project. Run `rail init` to initialize.');
@@ -24,7 +24,7 @@ export default defineCommand({
 
     const config = loadConfig(root);
     const allocations = loadPortAllocations(root);
-    const worktrees = await listWorktrees(root);
+    const worktrees = await gitVcsDriver.listFeatures(root);
     const treesDir = config.worktrees.dir.replace(/\/$/, '');
 
     const features = filterFeatureWorktrees(worktrees, treesDir);
@@ -34,8 +34,8 @@ export default defineCommand({
       return;
     }
 
-    const defaultBranch = await getDefaultBranch(root);
-    const ghAvailable = await isGhAvailable();
+    const defaultBranch = await gitVcsDriver.getDefaultParent(root);
+    const ghAvailable = await gitVcsDriver.isPullRequestProviderAvailable();
     if (!ghAvailable) {
       consola.warn('gh CLI unavailable; PR counts will be skipped');
     }
@@ -51,7 +51,7 @@ export default defineCommand({
 });
 
 /** @internal */
-export function filterFeatureWorktrees(worktrees: WorktreeInfo[], treesDir: string): WorktreeInfo[] {
+export function filterFeatureWorktrees(worktrees: VcsFeature[], treesDir: string): VcsFeature[] {
   const prefix = `${treesDir.replace(/\/$/, '')}/`;
   return worktrees.filter((wt) => wt.path.startsWith(prefix));
 }
@@ -81,7 +81,7 @@ interface CollectStatsOptions {
 const STATS_CONCURRENCY = 8;
 
 async function collectStats(
-  features: WorktreeInfo[],
+  features: VcsFeature[],
   options: CollectStatsOptions,
 ): Promise<FeatureRender[]> {
   const results: FeatureRender[] = new Array(features.length);
@@ -91,7 +91,7 @@ async function collectStats(
       const i = cursor++;
       if (i >= features.length) return;
       const wt = features[i]!;
-      const stats = await getWorktreeStats(wt.path, {
+      const stats = await gitVcsDriver.getLocalFeatureStatus(wt.path, {
         defaultBranch: options.defaultBranch,
         branch: wt.branch,
         ghAvailable: options.ghAvailable,
@@ -125,7 +125,7 @@ export function linkify(url: string, hyperlinks: boolean): string {
  * @internal
  */
 export function formatStats(
-  stats: WorktreeStats,
+  stats: VcsFeatureStatus,
   defaultBranch: string,
   options: { hyperlinks: boolean },
 ): string[] {
@@ -161,7 +161,7 @@ export function formatStats(
 
 function appendPrLines(
   lines: string[],
-  openPrs: WorktreeStats['openPrs'],
+  openPrs: VcsFeatureStatus['openPrs'],
   hyperlinks: boolean,
 ): void {
   switch (openPrs.state) {
@@ -187,8 +187,8 @@ function appendPrLines(
 }
 
 interface FeatureRender {
-  wt: WorktreeInfo;
-  stats: WorktreeStats;
+  wt: VcsFeature;
+  stats: VcsFeatureStatus;
 }
 
 interface PrintFeatureOptions {

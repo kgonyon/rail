@@ -746,7 +746,6 @@ describe('getWorktreeStats', () => {
   const defaultOptions = {
     defaultBranch: 'main',
     branch: 'refs/heads/feature/x',
-    ghAvailable: false,
   };
 
   it('returns clean stats when git status --porcelain fails', async () => {
@@ -835,7 +834,6 @@ describe('getWorktreeStats', () => {
     const stats = await getWorktreeStats('/fake/path', {
       defaultBranch: 'main',
       branch: 'main',
-      ghAvailable: false,
     });
 
     expect(revListCalled).toBe(false);
@@ -855,7 +853,6 @@ describe('getWorktreeStats', () => {
     await getWorktreeStats('/fake/path', {
       defaultBranch: 'main',
       branch: 'refs/heads/main',
-      ghAvailable: false,
     });
 
     expect(revListCalled).toBe(false);
@@ -912,7 +909,7 @@ describe('getWorktreeStats', () => {
     expect(stats.commitsAhead).toBe(2);
   });
 
-  it('short-circuits gh pr list when ghAvailable is false', async () => {
+  it('leaves review metadata unavailable for local Git stats', async () => {
     gitExecHandler = (_root: string, args: string) => {
       if (args.includes('rev-list')) return Promise.resolve('0\n');
       if (args.includes('diff HEAD --numstat')) return Promise.resolve('');
@@ -928,48 +925,6 @@ describe('getWorktreeStats', () => {
     expect(prListCalls).toHaveLength(0);
   });
 
-  it('populates openPrs when ghAvailable is true', async () => {
-    gitExecHandler = (_root: string, args: string) => {
-      if (args.includes('rev-list')) return Promise.resolve('0\n');
-      if (args.includes('diff HEAD --numstat')) return Promise.resolve('');
-      return Promise.resolve('');
-    };
-    ghExecHandler = () =>
-      Promise.resolve(
-        '[{"number":1,"url":"https://e/1"},{"number":2,"url":"https://e/2"}]',
-      );
-
-    const stats = await getWorktreeStats('/fake/path', {
-      defaultBranch: 'main',
-      branch: 'refs/heads/feature/x',
-      ghAvailable: true,
-    });
-
-    expect(stats.openPrs).toEqual({
-      state: 'ok',
-      prs: [
-        { number: 1, url: 'https://e/1' },
-        { number: 2, url: 'https://e/2' },
-      ],
-    });
-  });
-
-  it('returns error openPrs when ghAvailable is true but gh subprocess fails', async () => {
-    gitExecHandler = (_root: string, args: string) => {
-      if (args.includes('rev-list')) return Promise.resolve('0\n');
-      if (args.includes('diff HEAD --numstat')) return Promise.resolve('');
-      return Promise.resolve('');
-    };
-    ghExecHandler = () => Promise.reject(new Error('gh failed'));
-
-    const stats = await getWorktreeStats('/fake/path', {
-      defaultBranch: 'main',
-      branch: 'refs/heads/feature/x',
-      ghAvailable: true,
-    });
-
-    expect(stats.openPrs).toEqual({ state: 'error' });
-  });
 });
 
 describe('refreshFromOrigin', () => {

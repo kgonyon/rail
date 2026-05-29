@@ -3,7 +3,6 @@ import {
   fetchFromOrigin,
   getDefaultBranch,
   getWorktreeStats,
-  isGhAvailable,
   listWorktrees,
   refreshFromOrigin,
   removeWorktree,
@@ -35,7 +34,6 @@ export interface VcsDriver {
     path: string,
     options: WorktreeStatsOptions,
   ): Promise<VcsFeatureStatus>;
-  isPullRequestProviderAvailable(): Promise<boolean>;
 }
 
 interface GitVcsDriverDependencies {
@@ -48,7 +46,6 @@ interface GitVcsDriverDependencies {
   removeWorktree: typeof removeWorktree;
   listWorktrees: typeof listWorktrees;
   getWorktreeStats: typeof getWorktreeStats;
-  isGhAvailable: typeof isGhAvailable;
 }
 
 /** @internal */
@@ -81,7 +78,6 @@ export function createGitVcsDriver(deps: GitVcsDriverDependencies): VcsDriver {
     getLocalFeatureStatus(path, options) {
       return deps.getWorktreeStats(path, options);
     },
-    isPullRequestProviderAvailable: deps.isGhAvailable,
   };
 }
 
@@ -95,5 +91,4 @@ export const gitVcsDriver: VcsDriver = createGitVcsDriver({
   removeWorktree,
   listWorktrees,
   getWorktreeStats,
-  isGhAvailable,
 });

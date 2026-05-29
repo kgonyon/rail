@@ -26,8 +26,8 @@ export interface VcsDriver {
   resolveRoot(): Promise<string>;
   resolveProjectRoot(): Promise<string>;
   getDefaultParent(root: string): Promise<string>;
-  refreshParent(root: string): Promise<void>;
-  fetchParent(root: string): Promise<string>;
+  refreshParent(root: string, parentRef: string): Promise<void>;
+  fetchParent(root: string, parentRef: string): Promise<string>;
   createFeature(options: CreateFeatureOptions): Promise<void>;
   removeFeature(root: string, path: string): Promise<void>;
   listFeatures(root: string): Promise<VcsFeature[]>;
@@ -57,8 +57,12 @@ export function createGitVcsDriver(deps: GitVcsDriverDependencies): VcsDriver {
     resolveRoot: deps.getGitRoot,
     resolveProjectRoot: deps.getProjectRoot,
     getDefaultParent: deps.getDefaultBranch,
-    refreshParent: deps.refreshFromOrigin,
-    fetchParent: deps.fetchFromOrigin,
+    refreshParent(root, parentRef) {
+      return deps.refreshFromOrigin(root, parentRef);
+    },
+    fetchParent(root, parentRef) {
+      return deps.fetchFromOrigin(root, parentRef);
+    },
     createFeature(options) {
       return deps.addWorktree(
         options.root,

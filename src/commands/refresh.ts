@@ -1,4 +1,5 @@
 import { defineCommand } from 'citty';
+import { loadConfig } from '../lib/config';
 import { gitVcsDriver } from '../lib/vcs';
 
 export default defineCommand({
@@ -8,6 +9,7 @@ export default defineCommand({
   },
   async run() {
     const root = await gitVcsDriver.resolveProjectRoot();
-    await gitVcsDriver.refreshParent(root);
+    const config = loadConfig(root);
+    await gitVcsDriver.refreshParent(root, config.default_parent);
   },
 });

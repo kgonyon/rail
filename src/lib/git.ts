@@ -347,8 +347,11 @@ export async function getDefaultBranch(root: string): Promise<string> {
   }
 }
 
-export async function refreshFromOrigin(root: string): Promise<void> {
-  const branch = await getDefaultBranch(root);
+export async function refreshFromOrigin(root: string, parentRef?: string): Promise<void> {
+  const branch = parentRef ?? await getDefaultBranch(root);
+  if (!isSafeRefName(branch)) {
+    throw new Error(`Unsafe parent ref: ${branch}`);
+  }
   const { isDirty } = await getWorktreeStats(root, {
     defaultBranch: branch,
     branch,
@@ -383,16 +386,21 @@ export async function refreshFromOrigin(root: string): Promise<void> {
 }
 
 /**
- * Fetch the default branch from origin without touching any working tree.
- * Returns the default branch name so callers can use `origin/<branch>` as a
- * start point. Safe to run with uncommitted changes in the main repo.
+ * Fetch the parent ref from origin without touching any working tree.
+ * Returns the parent ref so callers can create features from the configured
+ * parent. Safe to run with uncommitted changes in the main repo.
  */
-export async function fetchFromOrigin(root: string): Promise<string> {
-  const branch = await getDefaultBranch(root);
+export async function fetchFromOrigin(root: string, parentRef?: string): Promise<string> {
+  const branch = parentRef ?? await getDefaultBranch(root);
+  if (!isSafeRefName(branch)) {
+    throw new Error(`Unsafe parent ref: ${branch}`);
+  }
 
-  consola.start(`Fetching origin/${branch}...`);
-  await $`git -C ${root} fetch origin ${branch}`.quiet();
-  consola.success(`Fetched origin/${branch}`);
+  const originBranch = branch.startsWith('origin/') ? branch.slice('origin/'.length) : branch;
+
+  consola.start(`Fetching origin/${originBranch}...`);
+  await $`git -C ${root} fetch origin ${originBranch}`.quiet();
+  consola.success(`Fetched origin/${originBranch}`);
 
   return branch;
 }

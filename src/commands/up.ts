@@ -28,7 +28,7 @@ export default defineCommand({
     const config = loadConfig(root);
     validateFeatureName(feature);
 
-    const defaultBranch = await gitVcsDriver.fetchParent(root);
+    const defaultParent = await gitVcsDriver.fetchParent(root, config.default_parent);
 
     const index = allocatePorts(root, feature, config.port);
     const ports = getPortsForFeature(config.port, index);
@@ -50,7 +50,7 @@ export default defineCommand({
       path: treePath,
       branchPrefix: config.worktrees.branch_prefix,
       feature,
-      parentRef: `origin/${defaultBranch}`,
+      parentRef: defaultParent,
     });
     consola.info(`Created worktree at ${treePath}`);
 

@@ -17,13 +17,13 @@ const deps = {
     calls.push({ name: 'getDefaultBranch', args: [root] });
     return Promise.resolve('main');
   },
-  refreshFromOrigin: (root: string) => {
-    calls.push({ name: 'refreshFromOrigin', args: [root] });
+  refreshFromOrigin: (root: string, parentRef?: string) => {
+    calls.push({ name: 'refreshFromOrigin', args: [root, parentRef] });
     return Promise.resolve();
   },
-  fetchFromOrigin: (root: string) => {
-    calls.push({ name: 'fetchFromOrigin', args: [root] });
-    return Promise.resolve('main');
+  fetchFromOrigin: (root: string, parentRef?: string) => {
+    calls.push({ name: 'fetchFromOrigin', args: [root, parentRef] });
+    return Promise.resolve(parentRef ?? 'main');
   },
   addWorktree: (
     root: string,
@@ -102,19 +102,19 @@ describe('createGitVcsDriver', () => {
     ]);
   });
 
-  it('removes, lists, refreshes, and fetches features through Git operations', async () => {
+  it('removes, lists, refreshes, and fetches configured parents through Git operations', async () => {
     await driver.removeFeature('/repo', '/repo/.trees/demo');
     await expect(driver.listFeatures('/repo')).resolves.toEqual([
       { path: '/repo/.trees/demo', head: 'abc', branch: 'refs/heads/feature/demo' },
     ]);
-    await driver.refreshParent('/repo');
-    await expect(driver.fetchParent('/repo')).resolves.toBe('main');
+    await driver.refreshParent('/repo', 'release');
+    await expect(driver.fetchParent('/repo', 'origin/develop')).resolves.toBe('origin/develop');
 
-    expect(calls.map((call) => call.name)).toEqual([
-      'removeWorktree',
-      'listWorktrees',
-      'refreshFromOrigin',
-      'fetchFromOrigin',
+    expect(calls).toEqual([
+      { name: 'removeWorktree', args: ['/repo', '/repo/.trees/demo'] },
+      { name: 'listWorktrees', args: ['/repo'] },
+      { name: 'refreshFromOrigin', args: ['/repo', 'release'] },
+      { name: 'fetchFromOrigin', args: ['/repo', 'origin/develop'] },
     ]);
   });
 

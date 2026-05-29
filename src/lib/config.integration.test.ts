@@ -5,6 +5,13 @@ import { homedir, tmpdir } from 'os';
 import { loadConfig } from './config';
 
 const baseConfig = `name: test-project
+vcs: git
+forge: github
+default_parent: main
+auto_refresh: true
+setup:
+  track_rail: true
+  ignore_destination: gitignore
 worktrees:
   dir: __PLACEHOLDER__
   branch_prefix: feature/

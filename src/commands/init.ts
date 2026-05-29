@@ -47,10 +47,24 @@ async function createDirectories(root: string): Promise<void> {
 }
 
 async function createConfigFile(root: string, projectName: string): Promise<void> {
-  const content = `# rail project configuration
+  await writeFile(join(root, '.rail', 'config.yaml'), buildConfigContent(projectName));
+}
+
+/** @internal */
+export function buildConfigContent(projectName: string): string {
+  return `# rail project configuration
 # Docs: https://github.com/kgonyon/rail
 
 name: ${projectName}
+
+vcs: git
+forge: github
+default_parent: main
+auto_refresh: true
+
+setup:
+  track_rail: true
+  ignore_destination: gitignore
 
 worktrees:
   # Directory where feature worktrees are created.
@@ -96,8 +110,6 @@ scripts:
 #   - event: run
 #     command: echo "Command finished!"
 `;
-
-  await writeFile(join(root, '.rail', 'config.yaml'), content);
 }
 
 async function createSetupScript(root: string): Promise<void> {

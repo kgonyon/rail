@@ -2,6 +2,7 @@ import { defineCommand } from 'citty';
 import consola from 'consola';
 import { getProjectRoot, getWorktreePath } from '../lib/paths';
 import { loadConfig } from '../lib/config';
+import { validateFeatureName } from '../lib/config';
 import { allocatePorts, getPortsForFeature } from '../lib/ports';
 import { addWorktree, fetchFromOrigin } from '../lib/git';
 import { generateEnvFiles } from '../lib/env';
@@ -26,6 +27,7 @@ export default defineCommand({
     const feature = args.feature;
     const root = await getProjectRoot();
     const config = loadConfig(root);
+    validateFeatureName(feature);
 
     const defaultBranch = await fetchFromOrigin(root);
 

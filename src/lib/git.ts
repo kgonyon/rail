@@ -58,7 +58,7 @@ export async function addWorktree(
 
 async function checkBranchExists(root: string, branch: string): Promise<boolean> {
   try {
-    await $`git -C ${root} rev-parse --verify ${branch}`.quiet();
+    await gitExec(root, `rev-parse --verify refs/heads/${branch}`);
     return true;
   } catch {
     return false;
@@ -352,6 +352,61 @@ export async function refreshFromOrigin(root: string, parentRef?: string): Promi
   if (!isSafeRefName(branch)) {
     throw new Error(`Unsafe parent ref: ${branch}`);
   }
+
+  if (await checkBranchExists(root, branch)) {
+    await refreshLocalBranch(root, branch);
+    return;
+  }
+
+  const remote = parseRemoteRef(branch);
+  if (remote) {
+    await fetchRemoteRef(root, remote.remote, remote.ref);
+    return;
+  }
+
+  throw new Error(`Parent ref "${branch}" is not a local branch or remote-shaped ref.`);
+}
+
+async function refreshLocalBranch(root: string, branch: string): Promise<void> {
+  const upstream = await getUpstreamBranch(root, branch);
+  if (!upstream) {
+    consola.info(`Local branch ${branch} has no upstream; skipping remote sync.`);
+    return;
+  }
+
+  const currentBranch = await getCurrentBranch(root);
+  if (currentBranch === branch) {
+    await pullCurrentBranch(root, branch);
+    return;
+  }
+
+  await fastForwardBranch(root, branch, upstream);
+}
+
+async function getUpstreamBranch(root: string, branch: string): Promise<string | null> {
+  try {
+    const output = await gitExec(root, `rev-parse --abbrev-ref ${branch}@{upstream}`);
+    const upstream = output.trim();
+    if (!isSafeRefName(upstream)) {
+      throw new Error(`Unsafe upstream ref for ${branch}: ${upstream}`);
+    }
+    return upstream;
+  } catch {
+    return null;
+  }
+}
+
+async function getCurrentBranch(root: string): Promise<string | null> {
+  try {
+    const output = await gitExec(root, 'branch --show-current');
+    const branch = output.trim();
+    return branch && isSafeRefName(branch) ? branch : null;
+  } catch {
+    return null;
+  }
+}
+
+async function pullCurrentBranch(root: string, branch: string): Promise<void> {
   const { isDirty } = await getWorktreeStats(root, {
     defaultBranch: branch,
     branch,
@@ -363,17 +418,16 @@ export async function refreshFromOrigin(root: string, parentRef?: string): Promi
     );
   }
 
-  consola.start(`Pulling origin/${branch}...`);
+  consola.start(`Pulling ${branch}...`);
 
   let output: string;
   try {
-    output = (await gitExec(root, `pull --ff-only origin ${branch}`)).trim();
+    output = (await gitExec(root, 'pull --ff-only')).trim();
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `Failed to fast-forward ${branch} from origin/${branch}. ` +
-        `Your local ${branch} likely has commits not on origin — investigate ` +
-        `and reset it to origin/${branch} before retrying.` +
+      `Failed to fast-forward ${branch} from its upstream. ` +
+        `Investigate the branch and retry when Git can fast-forward it.` +
         (detail ? `\n\n${detail}` : ''),
     );
   }
@@ -382,7 +436,33 @@ export async function refreshFromOrigin(root: string, parentRef?: string): Promi
     consola.info(output);
   }
 
-  consola.success(`Pulled latest from origin/${branch}`);
+  consola.success(`Pulled latest for ${branch}`);
+}
+
+async function fastForwardBranch(root: string, branch: string, upstream: string): Promise<void> {
+  consola.start(`Fast-forwarding ${branch} from ${upstream}...`);
+  try {
+    await gitExec(root, `fetch ${upstreamRemote(upstream)} ${upstreamBranch(upstream)}`);
+    await gitExec(root, `merge-base --is-ancestor ${branch} ${upstream}`);
+    await gitExec(root, `branch -f ${branch} ${upstream}`);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Failed to fast-forward ${branch} from ${upstream}. ` +
+        `Investigate the branch and retry when Git can fast-forward it.` +
+        (detail ? `\n\n${detail}` : ''),
+    );
+  }
+
+  consola.success(`Fast-forwarded ${branch} from ${upstream}`);
+}
+
+function upstreamRemote(upstream: string): string {
+  return upstream.split('/')[0] ?? 'origin';
+}
+
+function upstreamBranch(upstream: string): string {
+  return upstream.split('/').slice(1).join('/');
 }
 
 /**
@@ -396,13 +476,26 @@ export async function fetchFromOrigin(root: string, parentRef?: string): Promise
     throw new Error(`Unsafe parent ref: ${branch}`);
   }
 
-  const originBranch = branch.startsWith('origin/') ? branch.slice('origin/'.length) : branch;
-
-  consola.start(`Fetching origin/${originBranch}...`);
-  await $`git -C ${root} fetch origin ${originBranch}`.quiet();
-  consola.success(`Fetched origin/${originBranch}`);
-
   return branch;
+}
+
+function parseRemoteRef(ref: string): { remote: string; ref: string } | null {
+  const slashIndex = ref.indexOf('/');
+  if (slashIndex <= 0 || slashIndex === ref.length - 1) return null;
+  return {
+    remote: ref.slice(0, slashIndex),
+    ref: ref.slice(slashIndex + 1),
+  };
+}
+
+async function fetchRemoteRef(root: string, remote: string, ref: string): Promise<void> {
+  if (!isSafeRefName(remote) || !isSafeRefName(ref)) {
+    throw new Error(`Unsafe remote parent ref: ${remote}/${ref}`);
+  }
+
+  consola.start(`Fetching ${remote}/${ref}...`);
+  await gitExec(root, `fetch ${remote} ${ref}`);
+  consola.success(`Fetched ${remote}/${ref}`);
 }
 
 export interface WorktreeStatsOptions {

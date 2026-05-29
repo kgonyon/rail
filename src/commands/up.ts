@@ -21,6 +21,14 @@ export default defineCommand({
       description: 'Feature name for the worktree',
       required: true,
     },
+    parent: {
+      type: 'string',
+      description: 'Parent ref to create the feature from',
+    },
+    noRefresh: {
+      type: 'boolean',
+      description: 'Skip automatic parent refresh before creating the feature',
+    },
   },
   async run({ args }) {
     const feature = args.feature;
@@ -28,7 +36,20 @@ export default defineCommand({
     const config = loadConfig(root);
     validateFeatureName(feature);
 
-    const defaultParent = await gitVcsDriver.fetchParent(root, config.default_parent);
+    const effectiveParent = args.parent ?? config.default_parent;
+    if (config.auto_refresh && !args.noRefresh) {
+      try {
+        await gitVcsDriver.refreshParent(root, effectiveParent);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Failed to refresh parent "${effectiveParent}" before creating "${feature}".\n` +
+            `${detail}\n\nFix the refresh issue, or retry with \`rail up ${feature} --no-refresh\` to use current local state.`,
+        );
+      }
+    }
+
+    const parentRef = await gitVcsDriver.fetchParent(root, effectiveParent);
 
     const index = allocatePorts(root, feature, config.port);
     const ports = getPortsForFeature(config.port, index);
@@ -50,7 +71,7 @@ export default defineCommand({
       path: treePath,
       branchPrefix: config.worktrees.branch_prefix,
       feature,
-      parentRef: defaultParent,
+      parentRef,
     });
     consola.info(`Created worktree at ${treePath}`);
 

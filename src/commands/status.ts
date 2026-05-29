@@ -6,8 +6,8 @@ import { isRailProject } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { loadPortAllocations, getPortsForFeature } from '../lib/ports';
 import { getForgeDriver } from '../lib/forge';
-import { gitVcsDriver } from '../lib/vcs';
-import type { VcsFeature, VcsFeatureStatus } from '../lib/vcs';
+import { getVcsDriver, gitVcsDriver } from '../lib/vcs';
+import type { VcsDriver, VcsFeature, VcsFeatureStatus } from '../lib/vcs';
 import type { ForgeDriver, OpenReviewsResult } from '../lib/forge';
 import type { PortAllocations, RailConfig } from '../types/config';
 
@@ -17,7 +17,7 @@ export default defineCommand({
     description: 'Show all active feature worktrees with branch, port, and dirty state',
   },
   async run() {
-    const root = await gitVcsDriver.resolveRoot();
+    const root = await gitVcsDriver.resolveProjectRoot();
 
     if (!isRailProject(root)) {
       consola.warn('Not a rail project. Run `rail init` to initialize.');
@@ -25,8 +25,9 @@ export default defineCommand({
     }
 
     const config = loadConfig(root);
+    const vcsDriver = getVcsDriver(config.vcs);
     const allocations = loadPortAllocations(root);
-    const worktrees = await gitVcsDriver.listFeatures(root);
+    const worktrees = await vcsDriver.listFeatures(root);
     const treesDir = config.worktrees.dir.replace(/\/$/, '');
 
     const features = filterFeatureWorktrees(worktrees, treesDir);
@@ -36,7 +37,7 @@ export default defineCommand({
       return;
     }
 
-    const defaultBranch = await gitVcsDriver.getDefaultParent(root);
+    const defaultBranch = await vcsDriver.getDefaultParent(root);
     const forgeDriver = getForgeDriver(config.forge);
     const forgeAvailable = forgeDriver.isAvailable
       ? await forgeDriver.isAvailable()
@@ -50,6 +51,7 @@ export default defineCommand({
     const hyperlinks = shouldEmitHyperlinks();
     const renders = await collectStats(features, {
       defaultBranch,
+      vcsDriver,
       forgeDriver,
       forgeAvailable,
     });
@@ -90,13 +92,15 @@ export function shouldEmitHyperlinks(env = process.env): boolean {
 
 interface CollectStatsOptions {
   defaultBranch: string;
+  vcsDriver: VcsDriver;
   forgeDriver: ForgeDriver;
   forgeAvailable: boolean;
 }
 
 const STATS_CONCURRENCY = 8;
 
-async function collectStats(
+/** @internal */
+export async function collectStats(
   features: VcsFeature[],
   options: CollectStatsOptions,
 ): Promise<FeatureRender[]> {
@@ -107,13 +111,14 @@ async function collectStats(
       const i = cursor++;
       if (i >= features.length) return;
       const wt = features[i]!;
-      const stats = await gitVcsDriver.getLocalFeatureStatus(wt.path, {
+      const stats = await options.vcsDriver.getLocalFeatureStatus(wt.path, {
         defaultBranch: options.defaultBranch,
         branch: wt.branch,
       });
+      const reviewHead = wt.branch || wt.head;
       const openPrs = options.forgeAvailable
         ? toOpenPrsResult(
-            await options.forgeDriver.getOpenReviews(wt.path, wt.branch),
+            await options.forgeDriver.getOpenReviews(wt.path, reviewHead),
           )
         : { state: 'unavailable' as const };
       stats.openPrs = openPrs;
@@ -165,6 +170,9 @@ export function formatStats(
     reviewLabelPlural?: string;
   },
 ): string[] {
+  if (stats.localState === 'unknown') return ['unknown'];
+  if (stats.localState === 'changed') return ['changed'];
+
   const lines: string[] = [];
   const changedTotal = stats.stagedFiles + stats.unstagedFiles;
 
@@ -244,12 +252,12 @@ interface PrintFeatureOptions {
 function printFeatureStatus(render: FeatureRender, options: PrintFeatureOptions): void {
   const { wt, stats } = render;
   const { allocations, config, defaultBranch, hyperlinks, forgeDriver } = options;
-  const feature = basename(wt.path);
+  const feature = getFeatureDisplayName(wt);
   const allocation = allocations.features[feature];
   const ports = allocation
     ? getPortsForFeature(config.port, allocation.index)
     : [];
-  const branchName = wt.branch.replace('refs/heads/', '');
+  const refDisplay = getFeatureRefDisplay(wt);
   const portStr = ports.length > 0 ? ports.join(', ') : 'unallocated';
   const lines = formatStats(stats, defaultBranch, {
     hyperlinks,
@@ -258,7 +266,7 @@ function printFeatureStatus(render: FeatureRender, options: PrintFeatureOptions)
   });
 
   console.log(`  ${feature}`);
-  console.log(`    Branch: ${branchName}`);
+  console.log(`    ${refDisplay.label}: ${refDisplay.value}`);
   console.log(`    Ports:  ${portStr}`);
   if (lines.length === 1) {
     console.log(`    Status: ${lines[0]}`);
@@ -269,4 +277,17 @@ function printFeatureStatus(render: FeatureRender, options: PrintFeatureOptions)
     }
   }
   console.log('');
+}
+
+/** @internal */
+export function getFeatureDisplayName(wt: VcsFeature): string {
+  return wt.feature ?? basename(wt.path);
+}
+
+/** @internal */
+export function getFeatureRefDisplay(wt: VcsFeature): { label: string; value: string } {
+  return {
+    label: wt.refLabel ?? 'Branch',
+    value: (wt.displayLabel ?? wt.branch).replace('refs/heads/', ''),
+  };
 }

@@ -3,6 +3,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import {
   getWorktreePath,
+  findRailProjectRoot,
   getConfigPath,
   getLocalConfigPath,
   getPortAllocationsPath,
@@ -11,6 +12,9 @@ import {
   resolveRelativePath,
   resolveWorktreesDir,
 } from './paths';
+
+import { mkdirSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 
 describe('getWorktreePath', () => {
   it('joins an absolute trees dir with the feature name', () => {
@@ -23,6 +27,22 @@ describe('getWorktreePath', () => {
     expect(getWorktreePath('/Users/me/.rail/repos/app', 'feat')).toBe(
       join('/Users/me/.rail/repos/app', 'feat'),
     );
+  });
+});
+
+describe('findRailProjectRoot', () => {
+  it('walks up from feature trees to the canonical rail project root', () => {
+    const root = join(tmpdir(), `rail-paths-${Date.now()}-${Math.random()}`);
+    const featureDir = join(root, '.trees', 'demo', 'src');
+    mkdirSync(join(root, '.rail'), { recursive: true });
+    mkdirSync(featureDir, { recursive: true });
+    writeFileSync(join(root, '.rail', 'config.yaml'), 'name: test\n');
+
+    try {
+      expect(findRailProjectRoot(featureDir)).toBe(root);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
   });
 });
 

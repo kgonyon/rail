@@ -1,5 +1,5 @@
 import { $ } from 'bun';
-import { isAbsolute, join } from 'path';
+import { dirname, isAbsolute, join } from 'path';
 import { existsSync } from 'fs';
 import { homedir } from 'os';
 
@@ -16,22 +16,38 @@ export async function getGitRoot(): Promise<string> {
       const result = await $`git rev-parse --show-toplevel`.quiet();
       return result.text().trim();
     } catch {
-      throw new Error('Not inside a git repository. Run this command from within a git project.');
+      try {
+        const result = await $`jj root`.quiet();
+        return result.text().trim();
+      } catch {
+        throw new Error('Not inside a git or jj repository. Run this command from within a project.');
+      }
     }
   }
 }
 
 export async function getProjectRoot(): Promise<string> {
   const gitRoot = await getGitRoot();
-  const configPath = join(gitRoot, '.rail', 'config.yaml');
+  const projectRoot = findRailProjectRoot(gitRoot);
 
-  if (!existsSync(configPath)) {
+  if (!projectRoot) {
     throw new Error(
       `No .rail/config.yaml found at ${gitRoot}. Initialize with a config file at .rail/config.yaml`,
     );
   }
 
-  return gitRoot;
+  return projectRoot;
+}
+
+/** @internal */
+export function findRailProjectRoot(start: string): string | null {
+  let current = start;
+  while (true) {
+    if (existsSync(join(current, '.rail', 'config.yaml'))) return current;
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
 }
 
 export function getWorktreePath(dir: string, feature: string): string {

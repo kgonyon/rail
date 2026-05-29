@@ -12,6 +12,9 @@ export interface WorktreeInfo {
   path: string;
   head: string;
   branch: string;
+  feature?: string;
+  displayLabel?: string;
+  refLabel?: 'Branch' | 'Bookmark';
 }
 
 export interface OpenPrInfo {
@@ -34,6 +37,7 @@ export interface WorktreeStats {
   isDirty: boolean;
   commitsAhead: number;
   openPrs: OpenPrsResult;
+  localState?: 'clean' | 'changed' | 'unknown';
 }
 
 export async function addWorktree(

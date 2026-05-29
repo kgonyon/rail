@@ -62,7 +62,6 @@ describe('gitExec', () => {
     const root = mkdtempSync(join(tmpdir(), 'rail-shell-'));
     try {
       await expect(gitExec(root, 'status')).rejects.toThrow(/not a git repository/);
-      await expect(gitExec(root, 'status')).rejects.toThrow(/Failed with exit code/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

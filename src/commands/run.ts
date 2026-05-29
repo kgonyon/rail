@@ -62,7 +62,7 @@ async function runFeatureScoped(
     basePort: ports[0] ?? 0,
   };
 
-  let command = resolveRelativePath(cmdConfig.command, join(treePath, '.rail'));
+  let command = resolveCommandPath(cmdConfig.command, root);
   if (extraArgs.length > 0) {
     command = `${command} ${shellEscape(extraArgs)}`;
   }
@@ -87,7 +87,7 @@ async function runProjectScoped(
     basePort: 0,
   };
 
-  let command = resolveRelativePath(cmdConfig.command, join(root, '.rail'));
+  let command = resolveCommandPath(cmdConfig.command, root);
   if (extraArgs.length > 0) {
     command = `${command} ${shellEscape(extraArgs)}`;
   }
@@ -119,6 +119,11 @@ export function findCommand(config: RailConfig, name: string): CommandConfig {
   }
 
   return cmd;
+}
+
+/** @internal */
+export function resolveCommandPath(command: string, root: string): string {
+  return resolveRelativePath(command, join(root, '.rail'));
 }
 
 function lookupPorts(root: string, feature: string, config: RailConfig): number[] {

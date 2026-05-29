@@ -3,6 +3,8 @@ import consola from 'consola';
 import { basename, isAbsolute, relative, sep, join } from 'path';
 import { existsSync } from 'fs';
 import { mkdir, writeFile, appendFile, readFile, chmod } from 'fs/promises';
+import { parse, stringify } from 'yaml';
+import { isPlainObject, isSafeParentRefName, validateConfig } from '../lib/config';
 import { getGitRoot, resolveWorktreesDir } from '../lib/paths';
 import type { RailConfig } from '../types/config';
 
@@ -97,18 +99,105 @@ export async function initializeRailProject(
   options: InitOptions = defaultInitOptions(),
 ): Promise<void> {
   await createDirectories(root);
-  await createConfigFile(root, projectName, options);
+  const repairedOptions = await createConfigFile(root, projectName, options);
   await createSetupScript(root);
   await createCleanupScript(root);
-  await updateIgnoreRules(root, options);
+  await updateIgnoreRules(root, repairedOptions);
 }
 
 async function createDirectories(root: string): Promise<void> {
   await mkdir(join(root, '.rail', 'scripts'), { recursive: true });
 }
 
-async function createConfigFile(root: string, projectName: string, options: InitOptions): Promise<void> {
-  await writeFile(join(root, '.rail', 'config.yaml'), buildConfigContent(projectName, options));
+async function createConfigFile(root: string, projectName: string, options: InitOptions): Promise<InitOptions> {
+  const configPath = join(root, '.rail', 'config.yaml');
+
+  if (!existsSync(configPath)) {
+    await writeFile(configPath, buildConfigContent(projectName, options));
+    return options;
+  }
+
+  const existing = await readExistingConfig(configPath);
+  const repaired = repairConfig(existing, projectName, options);
+
+  validateConfig(repaired);
+  await writeFile(configPath, stringify(repaired));
+  return initOptionsFromConfig(repaired);
+}
+
+function initOptionsFromConfig(config: RailConfig): InitOptions {
+  return {
+    vcs: config.vcs,
+    forge: config.forge,
+    defaultParent: config.default_parent,
+    autoRefresh: config.auto_refresh,
+    trackRail: config.setup.track_rail,
+    ignoreDestination: config.setup.ignore_destination,
+    worktreesDir: config.worktrees.dir,
+  };
+}
+
+async function readExistingConfig(path: string): Promise<Record<string, any>> {
+  try {
+    const parsed = parse(await readFile(path, 'utf-8'));
+    return isPlainObject(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function repairConfig(
+  existing: Record<string, any>,
+  projectName: string,
+  options: InitOptions,
+): Record<string, any> {
+  const repaired = { ...existing };
+
+  repaired.name = nonEmptyString(existing.name) ? existing.name : projectName;
+  repaired.vcs = enumValue(existing.vcs, ['git', 'jj']) ?? options.vcs;
+  repaired.forge = enumValue(existing.forge, ['github', 'gitlab', 'none']) ?? options.forge;
+  repaired.default_parent = safeParent(existing.default_parent) ? existing.default_parent : options.defaultParent;
+  repaired.auto_refresh = typeof existing.auto_refresh === 'boolean' ? existing.auto_refresh : options.autoRefresh;
+
+  const existingSetup = isPlainObject(existing.setup) ? existing.setup : {};
+  repaired.setup = {
+    ...existingSetup,
+    track_rail: typeof existingSetup.track_rail === 'boolean' ? existingSetup.track_rail : options.trackRail,
+    ignore_destination: enumValue(existingSetup.ignore_destination, ['gitignore', 'exclude']) ?? options.ignoreDestination,
+  };
+
+  const existingWorktrees = isPlainObject(existing.worktrees) ? existing.worktrees : {};
+  repaired.worktrees = {
+    ...existingWorktrees,
+    dir: nonEmptyString(existingWorktrees.dir) ? existingWorktrees.dir : options.worktreesDir,
+    branch_prefix: safeParent(existingWorktrees.branch_prefix) ? existingWorktrees.branch_prefix : 'feature/',
+  };
+
+  const existingPort = isPlainObject(existing.port) ? existing.port : {};
+  repaired.port = {
+    ...existingPort,
+    base: positiveInteger(existingPort.base) ? existingPort.base : 3000,
+    per_feature: positiveInteger(existingPort.per_feature) ? existingPort.per_feature : 2,
+    max: positiveInteger(existingPort.max) ? existingPort.max : 100,
+  };
+
+  return repaired;
+}
+
+function enumValue<T extends string>(value: unknown, values: readonly T[]): T | undefined {
+  return typeof value === 'string' && values.includes(value as T) ? value as T : undefined;
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
+function safeParent(value: unknown): value is string {
+  return typeof value === 'string' && isSafeParentRefName(value);
+}
+
+function positiveInteger(value: unknown): value is number {
+  return Number.isInteger(value) && Number(value) > 0;
 }
 
 /** @internal */
@@ -303,6 +392,8 @@ echo "Setting up feature: $RAIL_FEATURE"
 `;
 
   const scriptPath = join(root, '.rail', 'scripts', 'setup.sh');
+  if (existsSync(scriptPath)) return;
+
   await writeFile(scriptPath, content);
   await chmod(scriptPath, 0o755);
 }
@@ -340,6 +431,8 @@ echo "Cleaning up feature: $RAIL_FEATURE"
 `;
 
   const scriptPath = join(root, '.rail', 'scripts', 'cleanup.sh');
+  if (existsSync(scriptPath)) return;
+
   await writeFile(scriptPath, content);
   await chmod(scriptPath, 0o755);
 }
@@ -359,7 +452,8 @@ export async function updateIgnoreRules(root: string, options: InitOptions): Pro
     ? await readFile(ignorePath, 'utf-8')
     : '';
 
-  const missing = entries.filter((entry) => !existing.includes(entry));
+  const existingEntries = new Set(existing.split(/\r?\n/).map((line) => line.trim()));
+  const missing = entries.filter((entry) => !existingEntries.has(entry));
 
   if (missing.length === 0) return;
 

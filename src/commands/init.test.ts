@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { parse } from 'yaml';
@@ -139,6 +139,161 @@ describe('initializeRailProject', () => {
 
     expect(gitignore).toContain('.rail/');
     expect(gitignore).toContain('trees/');
+  });
+
+  it('repairs an existing setup without changing valid settings', async () => {
+    const root = makeTempRoot();
+    mkdirSync(join(root, '.rail', 'scripts'), { recursive: true });
+    writeFileSync(join(root, '.rail', 'config.yaml'), `name: custom-project
+vcs: jj
+forge: none
+default_parent: trunk@origin
+auto_refresh: false
+setup:
+  track_rail: false
+  ignore_destination: exclude
+worktrees:
+  dir: ../feature-trees
+  branch_prefix: topic/
+port:
+  base: 4000
+  per_feature: 4
+  max: 40
+commands:
+  - name: test
+    command: bun test
+`);
+    writeFileSync(join(root, '.rail', 'scripts', 'setup.sh'), 'custom setup\n');
+
+    await initializeRailProject(root, 'ignored-project');
+
+    const config = parse(readFileSync(join(root, '.rail', 'config.yaml'), 'utf-8'));
+    const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf-8');
+
+    expect(() => validateConfig(config)).not.toThrow();
+    expect(config.name).toBe('custom-project');
+    expect(config.vcs).toBe('jj');
+    expect(config.forge).toBe('none');
+    expect(config.default_parent).toBe('trunk@origin');
+    expect(config.auto_refresh).toBe(false);
+    expect(config.setup).toEqual({ track_rail: false, ignore_destination: 'exclude' });
+    expect(config.worktrees).toEqual({ dir: '../feature-trees', branch_prefix: 'topic/' });
+    expect(config.port).toEqual({ base: 4000, per_feature: 4, max: 40 });
+    expect(config.commands).toEqual([{ name: 'test', command: 'bun test' }]);
+    expect(readFileSync(join(root, '.rail', 'scripts', 'setup.sh'), 'utf-8')).toBe('custom setup\n');
+    expect(exclude).toContain('.rail/');
+    expect(exclude).not.toContain('../feature-trees/');
+  });
+
+  it('fills missing keys from defaults on rerun', async () => {
+    const root = makeTempRoot();
+    mkdirSync(join(root, '.rail'), { recursive: true });
+    writeFileSync(join(root, '.rail', 'config.yaml'), `name: old-project
+worktrees:
+  dir: trees
+  branch_prefix: feature/
+port:
+  base: 3000
+  per_feature: 2
+  max: 100
+`);
+
+    await initializeRailProject(root, 'ignored-project');
+
+    const config = parse(readFileSync(join(root, '.rail', 'config.yaml'), 'utf-8'));
+
+    expect(() => validateConfig(config)).not.toThrow();
+    expect(config.name).toBe('old-project');
+    expect(config.vcs).toBe('git');
+    expect(config.forge).toBe('github');
+    expect(config.default_parent).toBe('main');
+    expect(config.auto_refresh).toBe(true);
+    expect(config.setup).toEqual({ track_rail: true, ignore_destination: 'gitignore' });
+  });
+
+  it('repairs invalid required values on rerun', async () => {
+    const root = makeTempRoot();
+    mkdirSync(join(root, '.rail'), { recursive: true });
+    writeFileSync(join(root, '.rail', 'config.yaml'), `name: old-project
+vcs: svn
+forge: bitbucket
+default_parent: main;rm
+auto_refresh: yes
+setup:
+  track_rail: yes
+  ignore_destination: nowhere
+worktrees:
+  dir: trees
+  branch_prefix: bad;prefix
+port:
+  base: 0
+  per_feature: two
+  max: -1
+`);
+
+    await initializeRailProject(root, 'ignored-project');
+
+    const config = parse(readFileSync(join(root, '.rail', 'config.yaml'), 'utf-8'));
+
+    expect(() => validateConfig(config)).not.toThrow();
+    expect(config.vcs).toBe('git');
+    expect(config.forge).toBe('github');
+    expect(config.default_parent).toBe('main');
+    expect(config.auto_refresh).toBe(true);
+    expect(config.setup).toEqual({ track_rail: true, ignore_destination: 'gitignore' });
+    expect(config.worktrees.branch_prefix).toBe('feature/');
+    expect(config.port).toEqual({ base: 3000, per_feature: 2, max: 100 });
+  });
+
+  it('uses flag-driven choices when repairing missing keys', async () => {
+    const root = makeTempRoot();
+    mkdirSync(join(root, '.rail'), { recursive: true });
+    writeFileSync(join(root, '.rail', 'config.yaml'), `name: old-project
+worktrees:
+  branch_prefix: feature/
+port:
+  base: 3000
+  per_feature: 2
+  max: 100
+`);
+
+    await initializeRailProject(root, 'ignored-project', defaultInitOptions({
+      vcs: 'jj',
+      forge: 'gitlab',
+      defaultParent: 'develop@origin',
+      autoRefresh: false,
+      trackRail: false,
+      ignoreDestination: 'exclude',
+      worktreesDir: '../feature-trees',
+    }));
+
+    const config = parse(readFileSync(join(root, '.rail', 'config.yaml'), 'utf-8'));
+    const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf-8');
+
+    expect(() => validateConfig(config)).not.toThrow();
+    expect(config.vcs).toBe('jj');
+    expect(config.forge).toBe('gitlab');
+    expect(config.default_parent).toBe('develop@origin');
+    expect(config.auto_refresh).toBe(false);
+    expect(config.setup).toEqual({ track_rail: false, ignore_destination: 'exclude' });
+    expect(config.worktrees.dir).toBe('../feature-trees');
+    expect(exclude).toContain('.rail/');
+  });
+
+  it('repairs ignore drift without duplicating existing rules', async () => {
+    const root = makeTempRoot();
+    mkdirSync(join(root, '.rail'), { recursive: true });
+    writeFileSync(join(root, '.rail', 'config.yaml'), buildConfigContent('test-project'));
+    writeFileSync(join(root, '.gitignore'), '# existing\n.rail/local.yaml\n');
+
+    await initializeRailProject(root, 'test-project');
+    await initializeRailProject(root, 'test-project');
+
+    const gitignore = readFileSync(join(root, '.gitignore'), 'utf-8');
+
+    expect(gitignore.match(/\.rail\/local\.yaml/g)?.length).toBe(1);
+    expect(gitignore.match(/\.rail\/port_allocations\.json/g)?.length).toBe(1);
+    expect(gitignore.match(/^trees\/$/gm)?.length).toBe(1);
   });
 });
 

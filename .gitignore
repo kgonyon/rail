@@ -2,7 +2,8 @@ node_modules/
 dist/
 *.bun-build
 
+.trellis/runtime/
+
 # rail local files
 .rail/
 trees/
-.trellis/runtime/

@@ -23,8 +23,8 @@ const ops = createJjOperations({
     if (args.startsWith('bookmark list ')) {
       return Promise.resolve('');
     }
-    if (args === 'diff --stat') {
-      return Promise.resolve('M file.ts | 1 +\n');
+    if (args.startsWith('log -r ')) {
+      return Promise.resolve('abc123\n');
     }
     return Promise.resolve('');
   },
@@ -164,11 +164,15 @@ describe('JJ operations', () => {
       { path: '/repo', head: 'main', branch: 'main', feature: 'repo', displayLabel: 'main', refLabel: 'Bookmark' },
       { path: '/repo/.trees/demo', head: 'feature/demo', branch: 'feature/demo', feature: 'demo', displayLabel: 'feature/demo', refLabel: 'Bookmark' },
     ]);
-    await expect(ops.getJjWorkspaceStats('/repo/.trees/demo')).resolves.toMatchObject({
+    await expect(ops.getJjWorkspaceStats('/repo/.trees/demo', 'main@origin')).resolves.toMatchObject({
       fileCount: 0,
       isDirty: true,
       localState: 'changed',
     });
+    expect(calls.at(-1)?.cwd).toBe('/repo/.trees/demo');
+    expect(calls.at(-1)?.args.startsWith('log -r ')).toBe(true);
+    expect(calls.at(-1)?.args).toContain('ancestors(main@origin)');
+    expect(calls.at(-1)?.args).toContain('~ empty()');
     expect(parseJjWorkspaceList('\n')).toEqual([]);
   });
 
@@ -218,5 +222,13 @@ describe('JJ operations', () => {
       isDirty: false,
       localState: 'unknown',
     });
+  });
+
+  it('rejects unsafe JJ status parents before running commands', async () => {
+    await expect(ops.getJjWorkspaceStats('/repo/.trees/demo', 'main;rm')).rejects.toThrow(
+      /Unsafe JJ parent ref/,
+    );
+
+    expect(calls).toEqual([]);
   });
 });

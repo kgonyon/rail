@@ -152,8 +152,8 @@ export function createJjVcsDriver(deps: JjVcsDriverDependencies): VcsDriver {
     listFeatures(root) {
       return deps.listJjWorkspaces(root);
     },
-    getLocalFeatureStatus(path) {
-      return deps.getJjWorkspaceStats(path);
+    getLocalFeatureStatus(path, options) {
+      return deps.getJjWorkspaceStats(path, options.defaultBranch);
     },
   };
 }

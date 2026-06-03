@@ -59,8 +59,8 @@ export async function listJjWorkspaces(root: string): Promise<WorktreeInfo[]> {
   return createJjOperations().listJjWorkspaces(root);
 }
 
-export async function getJjWorkspaceStats(path: string): Promise<WorktreeStats> {
-  return createJjOperations().getJjWorkspaceStats(path);
+export async function getJjWorkspaceStats(path: string, parentRef = 'main@origin'): Promise<WorktreeStats> {
+  return createJjOperations().getJjWorkspaceStats(path, parentRef);
 }
 
 /** @internal */
@@ -135,11 +135,13 @@ export function createJjOperations(deps: JjOperationsDependencies = { jjExec }) 
       return parseJjWorkspaceList(output);
     },
 
-    async getJjWorkspaceStats(path: string): Promise<WorktreeStats> {
+    async getJjWorkspaceStats(path: string, parentRef = 'main@origin'): Promise<WorktreeStats> {
+      validateJjRef(parentRef, 'parent ref');
+
       try {
-        const output = await deps.jjExec(path, 'diff --stat');
-        const isDirty = output.trim().length > 0;
-        return { ...CLEAN_STATS, isDirty, localState: isDirty ? 'changed' : 'clean' };
+        const output = await deps.jjExec(path, buildUnmergedChangesCommand(parentRef));
+        const hasChanges = output.trim().length > 0;
+        return { ...CLEAN_STATS, isDirty: hasChanges, localState: hasChanges ? 'changed' : 'clean' };
       } catch {
         return { ...CLEAN_STATS, localState: 'unknown', openPrs: { state: 'unavailable' } };
       }
@@ -242,6 +244,12 @@ function validateJjRef(ref: string, label: string): void {
   if (!isSafeParentRefName(ref)) {
     throw new Error(`Unsafe JJ ${label}: ${ref}`);
   }
+}
+
+function buildUnmergedChangesCommand(parentRef: string): string {
+  const revset = `((ancestors(@) ~ ancestors(${parentRef})) ~ empty())`;
+  const template = 'commit_id.short() ++ "\\n"';
+  return `log -r ${shellQuote(revset)} --no-graph --limit 1 --template ${shellQuote(template)}`;
 }
 
 function shellQuote(value: string): string {

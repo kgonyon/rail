@@ -37,7 +37,9 @@ export default defineCommand({
       return;
     }
 
-    const defaultBranch = await vcsDriver.getDefaultParent(root);
+    const defaultBranch = config.vcs === 'jj'
+      ? config.default_parent
+      : await vcsDriver.getDefaultParent(root);
     const forgeDriver = getForgeDriver(config.forge);
     const forgeAvailable = forgeDriver.isAvailable
       ? await forgeDriver.isAvailable()

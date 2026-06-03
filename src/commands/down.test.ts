@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'fs';
 import { rm } from 'fs/promises';
-import { tmpdir } from 'os';
+import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import { removeRemainingFeatureTree, validateDownTarget } from './down';
 
@@ -48,6 +48,24 @@ describe('down command source', () => {
     expect(() => validateDownTarget(makeDownTarget({ hasFeatureRef: true }), false)).toThrow(
       /No worktree found/,
     );
+  });
+
+  it('shortens home paths in missing worktree errors', () => {
+    let caught: unknown;
+
+    try {
+      validateDownTarget(makeDownTarget({
+        hasFeatureRef: true,
+        treePath: join(homedir(), 'Projects/dotfiles/trees/demo'),
+      }), false);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    const message = (caught as Error).message;
+    expect(message).toContain('at ~/Projects/dotfiles/trees/demo.');
+    expect(message).not.toContain(homedir());
   });
 
   it('rejects prune cleanup when no cleanup target exists', () => {

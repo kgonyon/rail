@@ -1,23 +1,22 @@
 import { describe, it, expect } from 'bun:test';
+import { mkdirSync, rmSync, writeFileSync } from 'fs';
+import { homedir, tmpdir } from 'os';
 import { join } from 'path';
-import { homedir } from 'os';
 import {
-  getGitRoot,
+  findRailProjectRoot,
+  formatPathForDisplay,
+  getConfigPath,
   getFeatureDirName,
   getFeatureNameFromDirName,
-  getWorktreePath,
-  findRailProjectRoot,
-  getConfigPath,
+  getGitRoot,
   getLocalConfigPath,
   getPortAllocationsPath,
   getUserConfigPath,
+  getWorktreePath,
   isRelativePath,
   resolveRelativePath,
   resolveWorktreesDir,
 } from './paths';
-
-import { mkdirSync, rmSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
 
 describe('getWorktreePath', () => {
   it('joins an absolute trees dir with the feature name', () => {
@@ -127,6 +126,28 @@ describe('resolveWorktreesDir', () => {
     expect(resolveWorktreesDir('/projects/app', '~bob/foo')).toBe(
       join('/projects/app', '~bob/foo'),
     );
+  });
+});
+
+describe('formatPathForDisplay', () => {
+  it('shortens the home directory to ~', () => {
+    expect(formatPathForDisplay(homedir())).toBe('~');
+  });
+
+  it('shortens paths inside the home directory', () => {
+    expect(formatPathForDisplay(join(homedir(), 'Projects/dotfiles'))).toBe(
+      '~/Projects/dotfiles',
+    );
+  });
+
+  it('does not shorten paths that only share the home prefix text', () => {
+    const path = `${homedir()}-archive/Projects/dotfiles`;
+
+    expect(formatPathForDisplay(path)).toBe(path);
+  });
+
+  it('leaves paths outside home unchanged', () => {
+    expect(formatPathForDisplay('/projects/app')).toBe('/projects/app');
   });
 });
 

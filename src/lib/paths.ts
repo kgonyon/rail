@@ -95,6 +95,16 @@ export function resolveWorktreesDir(root: string, dir: string): string {
   return join(root, dir);
 }
 
+export function formatPathForDisplay(path: string): string {
+  const home = homedir();
+  if (path === home) return '~';
+
+  const homePrefix = `${home}/`;
+  if (path.startsWith(homePrefix)) return `~/${path.slice(homePrefix.length)}`;
+
+  return path;
+}
+
 export function getConfigPath(root: string): string {
   return join(root, '.rail', 'config.yaml');
 }

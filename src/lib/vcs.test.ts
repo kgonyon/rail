@@ -189,8 +189,8 @@ const jjDeps = {
       { path: '/repo/.trees/demo', head: 'feature/demo', branch: 'feature/demo' },
     ]);
   },
-  getJjWorkspaceStats: (path: string) => {
-    calls.push({ name: 'getJjWorkspaceStats', args: [path] });
+  getJjWorkspaceStats: (path: string, parentRef?: string) => {
+    calls.push({ name: 'getJjWorkspaceStats', args: [path, parentRef] });
     return Promise.resolve({
       fileCount: 0,
       stagedFiles: 0,
@@ -252,7 +252,7 @@ describe('createJjVcsDriver', () => {
       { name: 'deleteJjBookmark', args: ['/repo', 'feature/demo'] },
       { name: 'jjBookmarkExists', args: ['/repo', 'feature/demo'] },
       { name: 'listJjWorkspaces', args: ['/repo'] },
-      { name: 'getJjWorkspaceStats', args: ['/repo/.trees/demo'] },
+      { name: 'getJjWorkspaceStats', args: ['/repo/.trees/demo', 'main@origin'] },
     ]);
   });
 

@@ -2,7 +2,7 @@ import { defineCommand } from 'citty';
 import consola from 'consola';
 import { mkdir } from 'fs/promises';
 import { dirname } from 'path';
-import { getWorktreePath } from '../lib/paths';
+import { formatPathForDisplay, getWorktreePath } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { validateFeatureName } from '../lib/config';
 import { allocatePorts, getPortsForFeature } from '../lib/ports';
@@ -78,7 +78,7 @@ export default defineCommand({
       feature,
       parentRef,
     });
-    consola.info(`Created worktree at ${treePath}`);
+    consola.info(`Created worktree at ${formatPathForDisplay(treePath)}`);
 
     consola.info(`Allocated ports: ${ports.join(', ')}`);
 
@@ -110,7 +110,7 @@ function printSummary(
       `Feature:  ${feature}`,
       `Branch:   ${branchPrefix}${feature}`,
       `Ports:    ${ports.join(', ')}`,
-      `Path:     ${treePath}`,
+      `Path:     ${formatPathForDisplay(treePath)}`,
     ].join('\n'),
   );
 }

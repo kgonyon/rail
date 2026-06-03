@@ -2,7 +2,7 @@ import { existsSync } from 'fs';
 import { rm } from 'fs/promises';
 import { defineCommand } from 'citty';
 import consola from 'consola';
-import { getWorktreePath } from '../lib/paths';
+import { formatPathForDisplay, getWorktreePath } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { loadPortAllocations, getPortsForFeature, deallocatePorts } from '../lib/ports';
 import { getVcsDriver, gitVcsDriver } from '../lib/vcs';
@@ -131,8 +131,10 @@ export function validateDownTarget(
 ): void {
   if (target.hasTree) return;
   if (!shouldPrune) {
+    const treePath = formatPathForDisplay(target.treePath);
     throw new Error(
-      `No worktree found for feature "${target.feature}" at ${target.treePath}. Check the feature name with "rail status".`,
+      `No worktree found for feature "${target.feature}" at ${treePath}. ` +
+        'Check the feature name with "rail status".',
     );
   }
   if (target.hasFeatureRef || target.hasPortAllocation) return;

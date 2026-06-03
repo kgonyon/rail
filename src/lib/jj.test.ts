@@ -14,8 +14,8 @@ const ops = createJjOperations({
     if (failWorkspaceForget && args.startsWith('workspace forget ')) {
       return Promise.reject(new Error('workspace missing'));
     }
-    if (args === 'workspace list') {
-      return Promise.resolve('main: /repo\ndemo: abc123 feature/demo* /repo/.trees/demo\n');
+    if (args.startsWith('workspace list --template ')) {
+      return Promise.resolve('default\t/repo\tmain\ndemo\t/repo/.trees/demo\tfeature/demo\n');
     }
     if (args === 'bookmark list feature/demo') {
       return Promise.resolve('feature/demo: abc123\n');
@@ -172,6 +172,13 @@ describe('JJ operations', () => {
     expect(parseJjWorkspaceList('\n')).toEqual([]);
   });
 
+  it('parses templated workspace roots and local bookmarks', () => {
+    expect(parseJjWorkspaceList('default\t/repo\t\nstatus\t/repo/.trees/status\tstatus,extra\n')).toEqual([
+      { path: '/repo', head: 'default', branch: 'default', feature: 'repo', displayLabel: 'default', refLabel: 'Bookmark' },
+      { path: '/repo/.trees/status', head: 'status', branch: 'status', feature: 'status', displayLabel: 'status', refLabel: 'Bookmark' },
+    ]);
+  });
+
   it('parses legacy workspace path-only lines and strips bookmark markers', () => {
     expect(parseJjWorkspaceList('demo: /repo/.trees/demo\n')).toEqual([
       { path: '/repo/.trees/demo', head: 'demo', branch: 'demo', feature: 'demo', displayLabel: 'demo', refLabel: 'Bookmark' },
@@ -182,6 +189,13 @@ describe('JJ operations', () => {
     expect(parseJjWorkspaceList('feature+demo: kkmp feature/demo* /repo/.trees/feature+demo\n')).toEqual([
       { path: '/repo/.trees/feature+demo', head: 'feature/demo', branch: 'feature/demo', feature: 'feature/demo', displayLabel: 'feature/demo', refLabel: 'Bookmark' },
     ]);
+  });
+
+  it('ignores default JJ workspace output that does not include paths', () => {
+    const output = 'default: ukpmkqyn e3f3efbe (empty) (no description set)\n' +
+      'status: kxvmkmuw e69033ab status | (empty) (no description set)\n';
+
+    expect(parseJjWorkspaceList(output)).toEqual([]);
   });
 
   it('reports clean and unknown simple JJ states', async () => {

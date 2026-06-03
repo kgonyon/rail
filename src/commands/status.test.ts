@@ -6,10 +6,12 @@ import {
   linkify,
   getFeatureDisplayName,
   getFeatureRefDisplay,
+  formatFeatureStatusMessage,
   shouldEmitHyperlinks,
 } from './status';
 import type { WorktreeInfo, WorktreeStats } from '../lib/git';
 import type { VcsDriver } from '../lib/vcs';
+import type { RailConfig } from '../types/config';
 
 describe('filterFeatureWorktrees', () => {
   const worktrees: WorktreeInfo[] = [
@@ -350,6 +352,58 @@ describe('feature display helpers', () => {
     };
 
     expect(getFeatureDisplayName(feature)).toBe('feature/demo');
+  });
+});
+
+describe('formatFeatureStatusMessage', () => {
+  it('formats feature details for boxed status output', () => {
+    const config: RailConfig = {
+      name: 'app',
+      vcs: 'jj',
+      forge: 'github',
+      default_parent: 'main@origin',
+      auto_refresh: true,
+      setup: { track_rail: false, ignore_destination: 'gitignore' },
+      worktrees: { dir: '/repo/.trees', branch_prefix: '' },
+      port: { base: 3000, per_feature: 2, max: 100 },
+    };
+
+    const message = formatFeatureStatusMessage({
+      wt: {
+        path: '/repo/.trees/status',
+        head: 'status',
+        branch: 'status',
+        feature: 'status',
+        displayLabel: 'status',
+        refLabel: 'Bookmark',
+      },
+      stats: {
+        fileCount: 0,
+        stagedFiles: 0,
+        unstagedFiles: 0,
+        untrackedFiles: 0,
+        insertions: 0,
+        deletions: 0,
+        isDirty: false,
+        commitsAhead: 0,
+        openPrs: { state: 'unavailable' },
+        localState: 'changed',
+      },
+    }, {
+      allocations: { features: { status: { index: 1 } } },
+      config,
+      defaultBranch: 'main@origin',
+      hyperlinks: false,
+      forgeDriver: {
+        reviewLabel: 'PR',
+        reviewLabelPlural: 'PRs',
+        getOpenReviews() {
+          return Promise.resolve({ state: 'unavailable' });
+        },
+      },
+    });
+
+    expect(message).toBe('status\nBookmark: status\nPorts:  3002, 3003\nStatus: changed');
   });
 });
 

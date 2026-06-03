@@ -21,6 +21,10 @@ const CLEAN_STATS: WorktreeStats = {
   openPrs: { state: 'ok', prs: [] },
 };
 
+const JJ_WORKSPACE_LIST_TEMPLATE =
+  'self.name() ++ "\\t" ++ self.root() ++ "\\t" ++ ' +
+  'self.target().local_bookmarks().map(|b| b.name()).join(",") ++ "\\n"';
+
 export async function refreshJjParent(root: string, parentRef: string): Promise<void> {
   return createJjOperations().refreshJjParent(root, parentRef);
 }
@@ -124,7 +128,10 @@ export function createJjOperations(deps: JjOperationsDependencies = { jjExec }) 
     },
 
     async listJjWorkspaces(root: string): Promise<WorktreeInfo[]> {
-      const output = await deps.jjExec(root, 'workspace list');
+      const output = await deps.jjExec(
+        root,
+        `workspace list --template ${shellQuote(JJ_WORKSPACE_LIST_TEMPLATE)}`,
+      );
       return parseJjWorkspaceList(output);
     },
 
@@ -152,6 +159,8 @@ export function parseJjWorkspaceList(output: string): WorktreeInfo[] {
 }
 
 function parseJjWorkspaceLine(line: string): WorktreeInfo {
+  if (line.includes('\t')) return parseTemplatedJjWorkspaceLine(line);
+
   const separator = line.indexOf(':');
   if (separator === -1) return emptyWorkspace();
 
@@ -167,8 +176,10 @@ function parseJjWorkspaceLine(line: string): WorktreeInfo {
       break;
     }
   }
-  const path = pathIndex === -1 ? rest : tokens[pathIndex]!;
-  const label = findBookmarkLabel(tokens.slice(0, pathIndex === -1 ? 0 : pathIndex)) ?? workspaceName;
+  if (pathIndex === -1) return emptyWorkspace();
+
+  const path = tokens[pathIndex]!;
+  const label = findBookmarkLabel(tokens.slice(0, pathIndex)) ?? workspaceName;
   return {
     path,
     head: label,
@@ -177,6 +188,26 @@ function parseJjWorkspaceLine(line: string): WorktreeInfo {
     displayLabel: label,
     refLabel: 'Bookmark',
   };
+}
+
+function parseTemplatedJjWorkspaceLine(line: string): WorktreeInfo {
+  const [workspaceName, path, bookmarkList = ''] = line.split('\t');
+  const label = firstBookmark(bookmarkList) ?? workspaceName;
+  if (!workspaceName || !path || !label) return emptyWorkspace();
+
+  return {
+    path,
+    head: label,
+    branch: label,
+    feature: getFeatureNameFromDirName(basename(path)),
+    displayLabel: label,
+    refLabel: 'Bookmark',
+  };
+}
+
+function firstBookmark(bookmarkList: string): string | null {
+  const bookmark = bookmarkList.split(',').find((item) => item.trim().length > 0);
+  return bookmark?.trim() ?? null;
 }
 
 function findBookmarkLabel(tokens: string[]): string | null {

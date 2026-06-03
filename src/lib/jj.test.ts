@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
-import { createJjOperations, parseJjWorkspaceList } from './jj';
+import {
+  createJjOperations,
+  parseJjDiffStatOutput,
+  parseJjRevisionCount,
+  parseJjWorkspaceList,
+} from './jj';
 
 const calls: Array<{ cwd: string; args: string }> = [];
 let failBookmarkCreate = false;
@@ -23,8 +28,11 @@ const ops = createJjOperations({
     if (args.startsWith('bookmark list ')) {
       return Promise.resolve('');
     }
+    if (args.startsWith('diff --from ')) {
+      return Promise.resolve('src/app.ts |  5 +++--\n1 file changed, 3 insertions(+), 2 deletions(-)\n');
+    }
     if (args.startsWith('log -r ')) {
-      return Promise.resolve('abc123\n');
+      return Promise.resolve('2\n');
     }
     return Promise.resolve('');
   },
@@ -159,21 +167,43 @@ describe('JJ operations', () => {
     expect(calls).toEqual([]);
   });
 
-  it('parses workspace list output and reports simple dirty state', async () => {
+  it('parses workspace list output and reports changed file and revision counts', async () => {
     await expect(ops.listJjWorkspaces('/repo')).resolves.toEqual([
       { path: '/repo', head: 'main', branch: 'main', feature: 'repo', displayLabel: 'main', refLabel: 'Bookmark' },
       { path: '/repo/.trees/demo', head: 'feature/demo', branch: 'feature/demo', feature: 'demo', displayLabel: 'feature/demo', refLabel: 'Bookmark' },
     ]);
     await expect(ops.getJjWorkspaceStats('/repo/.trees/demo', 'main@origin')).resolves.toMatchObject({
-      fileCount: 0,
+      fileCount: 1,
+      stagedFiles: 1,
+      insertions: 3,
+      deletions: 2,
+      commitsAhead: 2,
       isDirty: true,
       localState: 'changed',
     });
+    expect(calls.at(-2)).toEqual({
+      cwd: '/repo/.trees/demo',
+      args: "diff --from 'main@origin' --to @ --stat",
+    });
     expect(calls.at(-1)?.cwd).toBe('/repo/.trees/demo');
-    expect(calls.at(-1)?.args.startsWith('log -r ')).toBe(true);
     expect(calls.at(-1)?.args).toContain('ancestors(main@origin)');
     expect(calls.at(-1)?.args).toContain('~ empty()');
+    expect(calls.at(-1)?.args).toContain('--count');
     expect(parseJjWorkspaceList('\n')).toEqual([]);
+  });
+
+  it('parses JJ diff stat and revision count output', () => {
+    expect(parseJjDiffStatOutput(
+      'src/app.ts |  5 +++--\n1 file changed, 3 insertions(+), 2 deletions(-)\n',
+    )).toEqual({ fileCount: 1, insertions: 3, deletions: 2 });
+    expect(parseJjDiffStatOutput('2 files changed, 1 insertion(+), 0 deletions(-)\n')).toEqual({
+      fileCount: 2,
+      insertions: 1,
+      deletions: 0,
+    });
+    expect(parseJjDiffStatOutput('')).toEqual({ fileCount: 0, insertions: 0, deletions: 0 });
+    expect(parseJjRevisionCount('3\n')).toBe(3);
+    expect(parseJjRevisionCount('not-a-number\n')).toBe(0);
   });
 
   it('parses templated workspace roots and local bookmarks', () => {

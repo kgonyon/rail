@@ -2,7 +2,7 @@ import { defineCommand } from 'citty';
 import consola from 'consola';
 import { basename } from 'path';
 import { isatty } from 'tty';
-import { getFeatureNameFromDirName, isRailProject } from '../lib/paths';
+import { formatPathForDisplay, getFeatureNameFromDirName, isRailProject } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { loadPortAllocations, getPortsForFeature } from '../lib/ports';
 import { getForgeDriver } from '../lib/forge';
@@ -48,7 +48,7 @@ export default defineCommand({
       consola.warn(forgeDriver.unavailableWarning);
     }
 
-    consola.info(`Active features (${features.length}):\n`);
+    consola.info(`Active features (${features.length}):`);
 
     const hyperlinks = shouldEmitHyperlinks();
     const renders = await collectStats(features, {
@@ -57,15 +57,13 @@ export default defineCommand({
       forgeDriver,
       forgeAvailable,
     });
-    for (const render of renders) {
-      printFeatureStatus(render, {
-        allocations,
-        config,
-        defaultBranch,
-        hyperlinks,
-        forgeDriver,
-      });
-    }
+    printFeatureStatuses(renders, {
+      allocations,
+      config,
+      defaultBranch,
+      hyperlinks,
+      forgeDriver,
+    });
   },
 });
 
@@ -152,20 +150,20 @@ function toOpenPrsResult(result: OpenReviewsResult): VcsFeatureStatus['openPrs']
  * fix there is to upgrade tmux or set `RAIL_HYPERLINKS=never`.
  * @internal
  */
-export function linkify(url: string, hyperlinks: boolean): string {
-  if (!hyperlinks) return url;
-  return `\x1b]8;;${url}\x1b\\${url}\x1b]8;;\x1b\\`;
+export function linkify(url: string, text: string, hyperlinks: boolean): string {
+  if (!hyperlinks) return text;
+  return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
 }
 
 /**
  * Format worktree stats for display.
- * Returns one line per non-zero category, in fixed order:
- * changes -> untracked -> ahead -> PR. Returns `['clean']` when truly clean.
+ * Returns one compact line with non-zero segments in fixed order:
+ * changes -> untracked -> revisions -> reviews. Returns `['clean']` when truly clean.
  * @internal
  */
 export function formatStats(
   stats: VcsFeatureStatus,
-  defaultBranch: string,
+  _defaultBranch: string,
   options: {
     hyperlinks: boolean;
     reviewLabel?: string;
@@ -173,44 +171,42 @@ export function formatStats(
   },
 ): string[] {
   if (stats.localState === 'unknown') return ['unknown'];
-  if (stats.localState === 'changed') return ['changed'];
 
-  const lines: string[] = [];
-  const changedTotal = stats.stagedFiles + stats.unstagedFiles;
+  const segments: string[] = [];
+  const changedTotal = Math.max(0, stats.fileCount - stats.untrackedFiles);
 
   if (changedTotal > 0) {
     const noun = changedTotal === 1 ? 'file' : 'files';
-    let line = `${changedTotal} ${noun} changed (${stats.stagedFiles} staged, ${stats.unstagedFiles} unstaged)`;
+    let segment = `± ${changedTotal} ${noun}`;
     if (stats.insertions > 0 || stats.deletions > 0) {
-      line += `  +${stats.insertions} -${stats.deletions}`;
+      segment += ` +${stats.insertions} -${stats.deletions}`;
     }
-    lines.push(line);
+    segments.push(segment);
   }
 
   if (stats.untrackedFiles > 0) {
-    const noun = stats.untrackedFiles === 1 ? 'file' : 'files';
-    lines.push(`${stats.untrackedFiles} untracked ${noun}`);
+    segments.push(`+ ${stats.untrackedFiles} untracked`);
   }
 
   if (stats.commitsAhead > 0) {
-    const noun = stats.commitsAhead === 1 ? 'commit' : 'commits';
-    lines.push(`${stats.commitsAhead} ${noun} ahead of ${defaultBranch}`);
+    const noun = stats.commitsAhead === 1 ? 'rev' : 'revs';
+    segments.push(`⇢ ${stats.commitsAhead} ${noun}`);
   } else if (stats.commitsAhead === -1) {
-    lines.push(`? commits ahead of ${defaultBranch}`);
+    segments.push('⇢ ? revs');
   }
 
-  appendPrLines(lines, stats.openPrs, {
+  appendReviewSegments(segments, stats.openPrs, {
     hyperlinks: options.hyperlinks,
     reviewLabel: options.reviewLabel ?? 'PR',
     reviewLabelPlural: options.reviewLabelPlural ?? 'PRs',
   });
 
-  if (lines.length === 0) return ['clean'];
-  return lines;
+  if (segments.length === 0) return ['clean'];
+  return [segments.join(' | ')];
 }
 
-function appendPrLines(
-  lines: string[],
+function appendReviewSegments(
+  segments: string[],
   openPrs: VcsFeatureStatus['openPrs'],
   options: { hyperlinks: boolean; reviewLabel: string; reviewLabelPlural: string },
 ): void {
@@ -218,21 +214,18 @@ function appendPrLines(
     case 'unavailable':
       return;
     case 'error':
-      lines.push(`? open ${options.reviewLabelPlural}`);
+      segments.push(`? ${options.reviewLabelPlural}`);
       return;
     case 'ok': {
       const { prs } = openPrs;
       if (prs.length === 0) return;
       if (prs.length === 1) {
-        lines.push(
-          `1 open ${options.reviewLabel}: ${linkify(prs[0]!.url, options.hyperlinks)}`,
-        );
+        const pr = prs[0]!;
+        segments.push(`${options.reviewLabel} ${linkify(pr.url, `#${pr.number}`, options.hyperlinks)}`);
         return;
       }
-      lines.push(`${prs.length} open ${options.reviewLabelPlural}:`);
-      for (const pr of prs) {
-        lines.push(`  #${pr.number} ${linkify(pr.url, options.hyperlinks)}`);
-      }
+      const links = prs.map((pr) => linkify(pr.url, `#${pr.number}`, options.hyperlinks));
+      segments.push(`${options.reviewLabelPlural} ${links.join(' ')}`);
       return;
     }
   }
@@ -251,8 +244,41 @@ export interface PrintFeatureOptions {
   forgeDriver: ForgeDriver;
 }
 
-function printFeatureStatus(render: FeatureRender, options: PrintFeatureOptions): void {
-  consola.box(formatFeatureStatusMessage(render, options));
+function printFeatureStatuses(renders: FeatureRender[], options: PrintFeatureOptions): void {
+  const messages = renders.map((render) => formatFeatureStatusMessage(render, options));
+  const width = Math.max(...messages.map(getFeatureStatusBoxWidth));
+  const boxes = messages.map((message) => formatFeatureStatusBox(message, width));
+  consola.log(boxes.join('\n'));
+}
+
+/** @internal */
+export function formatFeatureStatusBox(message: string, boxWidth?: number): string {
+  const lines = message.split('\n');
+  const width = Math.max(boxWidth ?? 0, getFeatureStatusBoxWidth(message));
+  return [
+    `╭${'─'.repeat(width)}╮`,
+    `│${' '.repeat(width)}│`,
+    ...lines.map((line) => formatBoxLine(line, width)),
+    `│${' '.repeat(width)}│`,
+    `╰${'─'.repeat(width)}╯`,
+  ].join('\n');
+}
+
+/** @internal */
+export function getFeatureStatusBoxWidth(message: string): number {
+  return Math.max(...message.split('\n').map(visibleLength)) + 4;
+}
+
+function formatBoxLine(line: string, width: number): string {
+  const padding = ' '.repeat(width - visibleLength(line) - 2);
+  return `│  ${line}${padding}│`;
+}
+
+function visibleLength(line: string): number {
+  return line
+    .replace(/\x1b\]8;;.*?\x1b\\/g, '')
+    .replace(/\x1b\[[0-9;]*m/g, '')
+    .length;
 }
 
 /** @internal */
@@ -273,16 +299,24 @@ export function formatFeatureStatusMessage(render: FeatureRender, options: Print
   });
 
   return [
-    feature,
-    `${refDisplay.label}: ${refDisplay.value}`,
-    `Ports:  ${portStr}`,
+    formatStatusField('Feature', feature),
+    formatStatusField(refDisplay.label, refDisplay.value),
+    formatStatusField('Ports', portStr),
+    formatStatusField('Path', formatPathForDisplay(wt.path)),
     ...formatStatusMessageLines(lines),
   ].join('\n');
 }
 
+const STATUS_FIELD_LABEL_WIDTH = 8;
+
+function formatStatusField(label: string, value: string): string {
+  const padding = ' '.repeat(Math.max(1, STATUS_FIELD_LABEL_WIDTH - label.length + 1));
+  return `${label}:${padding}${value}`;
+}
+
 function formatStatusMessageLines(lines: string[]): string[] {
-  if (lines.length === 1) return [`Status: ${lines[0]}`];
-  return ['Status:', ...lines.map((line) => `  ${line}`)];
+  if (lines.length === 1) return [formatStatusField('Changes', lines[0]!)];
+  return ['Changes:', ...lines.map((line) => `  ${line}`)];
 }
 
 /** @internal */
@@ -293,7 +327,7 @@ export function getFeatureDisplayName(wt: VcsFeature): string {
 /** @internal */
 export function getFeatureRefDisplay(wt: VcsFeature): { label: string; value: string } {
   return {
-    label: wt.refLabel ?? 'Branch',
+    label: 'Revision',
     value: (wt.displayLabel ?? wt.branch).replace('refs/heads/', ''),
   };
 }

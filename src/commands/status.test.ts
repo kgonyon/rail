@@ -1,12 +1,16 @@
 import { describe, it, expect } from 'bun:test';
+import { homedir } from 'os';
+import { join } from 'path';
 import {
   collectStats,
   filterFeatureWorktrees,
+  formatFeatureStatusBox,
+  formatFeatureStatusMessage,
   formatStats,
-  linkify,
   getFeatureDisplayName,
   getFeatureRefDisplay,
-  formatFeatureStatusMessage,
+  getFeatureStatusBoxWidth,
+  linkify,
   shouldEmitHyperlinks,
 } from './status';
 import type { WorktreeInfo, WorktreeStats } from '../lib/git';
@@ -83,76 +87,74 @@ describe('formatStats', () => {
     expect(formatStats(makeStats(), 'main', { hyperlinks: false })).toEqual(['clean']);
   });
 
-  it('renders simple JJ clean, changed, and unknown states', () => {
+  it('renders clean and unknown states', () => {
     expect(formatStats(makeStats({ localState: 'clean' }), 'main', { hyperlinks: false })).toEqual(['clean']);
-    expect(formatStats(makeStats({ localState: 'changed', isDirty: true }), 'main', { hyperlinks: false })).toEqual(['changed']);
     expect(formatStats(makeStats({ localState: 'unknown' }), 'main', { hyperlinks: false })).toEqual(['unknown']);
   });
 
-  it('formats only-staged changes without insertions/deletions block', () => {
-    const stats = makeStats({ stagedFiles: 2, fileCount: 2, isDirty: true });
+  it('formats tracked changes without insertions/deletions block', () => {
+    const stats = makeStats({ fileCount: 2, isDirty: true });
     expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual([
-      '2 files changed (2 staged, 0 unstaged)',
+      '± 2 files',
     ]);
   });
 
-  it('formats only-unstaged changes with insertions and deletions', () => {
+  it('formats tracked changes with insertions and deletions', () => {
     const stats = makeStats({
-      unstagedFiles: 3,
       fileCount: 3,
       insertions: 12,
       deletions: 5,
       isDirty: true,
     });
     expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual([
-      '3 files changed (0 staged, 3 unstaged)  +12 -5',
+      '± 3 files +12 -5',
     ]);
   });
 
-  it('combines staged and unstaged file counts', () => {
+  it('does not double count files with staged and unstaged changes', () => {
     const stats = makeStats({
       stagedFiles: 2,
       unstagedFiles: 1,
-      fileCount: 3,
+      fileCount: 2,
       insertions: 7,
       deletions: 0,
       isDirty: true,
     });
     expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual([
-      '3 files changed (2 staged, 1 unstaged)  +7 -0',
+      '± 2 files +7 -0',
     ]);
   });
 
   it('uses singular "file" when exactly one changed file', () => {
     const stats = makeStats({ stagedFiles: 1, fileCount: 1, isDirty: true });
     expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual([
-      '1 file changed (1 staged, 0 unstaged)',
+      '± 1 file',
     ]);
   });
 
   it('formats only untracked plural', () => {
     const stats = makeStats({ untrackedFiles: 2, fileCount: 2, isDirty: true });
-    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['2 untracked files']);
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['+ 2 untracked']);
   });
 
   it('formats only untracked singular', () => {
     const stats = makeStats({ untrackedFiles: 1, fileCount: 1, isDirty: true });
-    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['1 untracked file']);
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['+ 1 untracked']);
   });
 
-  it('formats only commits ahead plural', () => {
+  it('formats only revisions since parent plural', () => {
     const stats = makeStats({ commitsAhead: 3 });
-    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['3 commits ahead of main']);
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['⇢ 3 revs']);
   });
 
-  it('formats only commits ahead singular', () => {
+  it('formats only revisions since parent singular', () => {
     const stats = makeStats({ commitsAhead: 1 });
-    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['1 commit ahead of main']);
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['⇢ 1 rev']);
   });
 
-  it('renders ? when commitsAhead is -1 sentinel', () => {
+  it('renders ? when revision count is unknown', () => {
     const stats = makeStats({ commitsAhead: -1 });
-    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['? commits ahead of main']);
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['⇢ ? revs']);
   });
 
   it('omits ahead line when commitsAhead is 0', () => {
@@ -160,7 +162,7 @@ describe('formatStats', () => {
     expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['clean']);
   });
 
-  it('formats one open PR with the URL inlined on the same line', () => {
+  it('formats one open PR with a compact number label', () => {
     const stats = makeStats({
       openPrs: {
         state: 'ok',
@@ -168,11 +170,11 @@ describe('formatStats', () => {
       },
     });
     expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual([
-      '1 open PR: https://example.com/owner/repo/pull/123',
+      'PR #123',
     ]);
   });
 
-  it('formats two open PRs as a count line plus indented entries', () => {
+  it('formats two open PRs as compact number labels', () => {
     const stats = makeStats({
       openPrs: {
         state: 'ok',
@@ -183,13 +185,11 @@ describe('formatStats', () => {
       },
     });
     expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual([
-      '2 open PRs:',
-      '  #123 https://example.com/owner/repo/pull/123',
-      '  #456 https://example.com/owner/repo/pull/456',
+      'PRs #123 #456',
     ]);
   });
 
-  it('formats three open PRs with count line plus three indented entries', () => {
+  it('formats three open PRs as compact number labels', () => {
     const stats = makeStats({
       openPrs: {
         state: 'ok',
@@ -201,16 +201,13 @@ describe('formatStats', () => {
       },
     });
     expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual([
-      '3 open PRs:',
-      '  #1 https://e/1',
-      '  #2 https://e/2',
-      '  #3 https://e/3',
+      'PRs #1 #2 #3',
     ]);
   });
 
   it('renders ? open PRs when openPrs state is error', () => {
     const stats = makeStats({ openPrs: { state: 'error' } });
-    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['? open PRs']);
+    expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual(['? PRs']);
   });
 
   it('renders open reviews with MR labels when provided by the forge driver', () => {
@@ -225,7 +222,7 @@ describe('formatStats', () => {
       hyperlinks: false,
       reviewLabel: 'MR',
       reviewLabelPlural: 'MRs',
-    })).toEqual(['1 open MR: https://gitlab.com/owner/repo/-/merge_requests/123']);
+    })).toEqual(['MR #123']);
   });
 
   it('omits PR lines when openPrs state is unavailable', () => {
@@ -250,20 +247,17 @@ describe('formatStats', () => {
       commitsAhead: 4,
       openPrs: {
         state: 'ok',
-        prs: [{ number: 7, url: 'https://example.com/owner/repo/pull/7' }],
+      prs: [{ number: 7, url: 'https://example.com/owner/repo/pull/7' }],
       },
     });
     expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual([
-      '3 files changed (2 staged, 1 unstaged)  +42 -7',
-      '2 untracked files',
-      '4 commits ahead of main',
-      '1 open PR: https://example.com/owner/repo/pull/7',
+      '± 3 files +42 -7 | + 2 untracked | ⇢ 4 revs | PR #7',
     ]);
   });
 
-  it('propagates a non-default branch name into the ahead line', () => {
+  it('formats revision counts without parent names', () => {
     const stats = makeStats({ commitsAhead: 2 });
-    expect(formatStats(stats, 'master', { hyperlinks: false })).toEqual(['2 commits ahead of master']);
+    expect(formatStats(stats, 'master', { hyperlinks: false })).toEqual(['⇢ 2 revs']);
   });
 
   it('wraps a single PR URL in OSC 8 escapes when hyperlinks is true', () => {
@@ -275,7 +269,7 @@ describe('formatStats', () => {
       },
     });
     expect(formatStats(stats, 'main', { hyperlinks: true })).toEqual([
-      `1 open PR: ${linkify(url, true)}`,
+      `PR ${linkify(url, '#123', true)}`,
     ]);
   });
 
@@ -292,9 +286,7 @@ describe('formatStats', () => {
       },
     });
     expect(formatStats(stats, 'main', { hyperlinks: true })).toEqual([
-      '2 open PRs:',
-      `  #123 ${linkify(url1, true)}`,
-      `  #456 ${linkify(url2, true)}`,
+      `PRs ${linkify(url1, '#123', true)} ${linkify(url2, '#456', true)}`,
     ]);
   });
 
@@ -311,15 +303,13 @@ describe('formatStats', () => {
       },
     });
     expect(formatStats(stats, 'main', { hyperlinks: false })).toEqual([
-      '2 open PRs:',
-      `  #123 ${url1}`,
-      `  #456 ${url2}`,
+      'PRs #123 #456',
     ]);
   });
 });
 
 describe('feature display helpers', () => {
-  it('uses JJ feature and bookmark labels when present', () => {
+  it('uses JJ feature labels with neutral revision wording', () => {
     const feature: WorktreeInfo = {
       path: '/repo/.trees/demo',
       head: 'feature/demo',
@@ -330,10 +320,10 @@ describe('feature display helpers', () => {
     };
 
     expect(getFeatureDisplayName(feature)).toBe('demo');
-    expect(getFeatureRefDisplay(feature)).toEqual({ label: 'Bookmark', value: 'feature/demo' });
+    expect(getFeatureRefDisplay(feature)).toEqual({ label: 'Revision', value: 'feature/demo' });
   });
 
-  it('falls back to Git branch labels from the path and branch', () => {
+  it('uses Git branch values with neutral revision wording', () => {
     const feature: WorktreeInfo = {
       path: '/repo/.trees/demo',
       head: 'abc',
@@ -341,7 +331,7 @@ describe('feature display helpers', () => {
     };
 
     expect(getFeatureDisplayName(feature)).toBe('demo');
-    expect(getFeatureRefDisplay(feature)).toEqual({ label: 'Branch', value: 'feature/demo' });
+    expect(getFeatureRefDisplay(feature)).toEqual({ label: 'Revision', value: 'feature/demo' });
   });
 
   it('decodes normalized slash-separated feature directory names for display', () => {
@@ -356,6 +346,34 @@ describe('feature display helpers', () => {
 });
 
 describe('formatFeatureStatusMessage', () => {
+  it('formats a status box without trailing spacing between boxes', () => {
+    expect(formatFeatureStatusBox('Feature:  demo\nChanges:  clean')).toBe(
+      '╭───────────────────╮\n' +
+      '│                   │\n' +
+      '│  Feature:  demo   │\n' +
+      '│  Changes:  clean  │\n' +
+      '│                   │\n' +
+      '╰───────────────────╯',
+    );
+  });
+
+  it('formats feature boxes with a shared width from the largest box', () => {
+    const shortMessage = 'Feature:  demo\nChanges:  clean';
+    const longMessage = 'Feature:  much-longer-feature\nChanges:  ± 12 files +100 -2';
+    const width = Math.max(
+      getFeatureStatusBoxWidth(shortMessage),
+      getFeatureStatusBoxWidth(longMessage),
+    );
+
+    const shortBox = formatFeatureStatusBox(shortMessage, width);
+    const longBox = formatFeatureStatusBox(longMessage, width);
+
+    expect(shortBox.split('\n')[0]).toBe(longBox.split('\n')[0]);
+    expect(shortBox.split('\n').map((line) => line.length)).toEqual(
+      longBox.split('\n').map((line) => line.length),
+    );
+  });
+
   it('formats feature details for boxed status output', () => {
     const config: RailConfig = {
       name: 'app',
@@ -403,7 +421,119 @@ describe('formatFeatureStatusMessage', () => {
       },
     });
 
-    expect(message).toBe('status\nBookmark: status\nPorts:  3002, 3003\nStatus: changed');
+    expect(message).toBe(
+      'Feature:  status\n' +
+      'Revision: status\n' +
+      'Ports:    3002, 3003\n' +
+      'Path:     /repo/.trees/status\n' +
+      'Changes:  clean',
+    );
+  });
+
+  it('shortens home paths in status output', () => {
+    const config: RailConfig = {
+      name: 'app',
+      vcs: 'jj',
+      forge: 'github',
+      default_parent: 'main@origin',
+      auto_refresh: true,
+      setup: { track_rail: false, ignore_destination: 'gitignore' },
+      worktrees: { dir: join(homedir(), 'Projects/dotfiles/.trees'), branch_prefix: '' },
+      port: { base: 3000, per_feature: 2, max: 100 },
+    };
+
+    const message = formatFeatureStatusMessage({
+      wt: {
+        path: join(homedir(), 'Projects/dotfiles/.trees/status'),
+        head: 'status',
+        branch: 'status',
+        feature: 'status',
+        displayLabel: 'status',
+        refLabel: 'Bookmark',
+      },
+      stats: {
+        fileCount: 0,
+        stagedFiles: 0,
+        unstagedFiles: 0,
+        untrackedFiles: 0,
+        insertions: 0,
+        deletions: 0,
+        isDirty: false,
+        commitsAhead: 0,
+        openPrs: { state: 'unavailable' },
+        localState: 'changed',
+      },
+    }, {
+      allocations: { features: { status: { index: 1 } } },
+      config,
+      defaultBranch: 'main@origin',
+      hyperlinks: false,
+      forgeDriver: {
+        reviewLabel: 'PR',
+        reviewLabelPlural: 'PRs',
+        getOpenReviews() {
+          return Promise.resolve({ state: 'unavailable' });
+        },
+      },
+    });
+
+    expect(message).toContain('Path:     ~/Projects/dotfiles/.trees/status');
+    expect(message).not.toContain(homedir());
+  });
+
+  it('keeps compact status values on the aligned status row', () => {
+    const config: RailConfig = {
+      name: 'app',
+      vcs: 'jj',
+      forge: 'github',
+      default_parent: 'main@origin',
+      auto_refresh: true,
+      setup: { track_rail: false, ignore_destination: 'gitignore' },
+      worktrees: { dir: '/repo/.trees', branch_prefix: '' },
+      port: { base: 3000, per_feature: 2, max: 100 },
+    };
+
+    const message = formatFeatureStatusMessage({
+      wt: {
+        path: '/repo/.trees/status',
+        head: 'status',
+        branch: 'status',
+        feature: 'status',
+        displayLabel: 'status',
+        refLabel: 'Bookmark',
+      },
+      stats: {
+        fileCount: 2,
+        stagedFiles: 2,
+        unstagedFiles: 0,
+        untrackedFiles: 0,
+        insertions: 3,
+        deletions: 1,
+        isDirty: true,
+        commitsAhead: 1,
+        openPrs: { state: 'unavailable' },
+      },
+    }, {
+      allocations: { features: { status: { index: 1 } } },
+      config,
+      defaultBranch: 'main@origin',
+      hyperlinks: false,
+      forgeDriver: {
+        reviewLabel: 'PR',
+        reviewLabelPlural: 'PRs',
+        getOpenReviews() {
+          return Promise.resolve({ state: 'unavailable' });
+        },
+      },
+    });
+
+    expect(message).toBe(
+      'Feature:  status\n' +
+      'Revision: status\n' +
+      'Ports:    3002, 3003\n' +
+      'Path:     /repo/.trees/status\n' +
+      'Changes:  ± 2 files +3 -1 | ⇢ 1 rev',
+    );
   });
 });
 
@@ -457,13 +587,13 @@ describe('collectStats', () => {
 });
 
 describe('linkify', () => {
-  it('returns the URL unchanged when hyperlinks is false', () => {
-    expect(linkify('https://example.com/x', false)).toBe('https://example.com/x');
+  it('returns the visible text unchanged when hyperlinks is false', () => {
+    expect(linkify('https://example.com/x', 'PR #123', false)).toBe('PR #123');
   });
 
-  it('wraps the URL in OSC 8 escape sequences when hyperlinks is true', () => {
-    expect(linkify('https://example.com/x', true)).toBe(
-      '\x1b]8;;https://example.com/x\x1b\\https://example.com/x\x1b]8;;\x1b\\',
+  it('wraps visible text in OSC 8 escape sequences when hyperlinks is true', () => {
+    expect(linkify('https://example.com/x', 'PR #123', true)).toBe(
+      '\x1b]8;;https://example.com/x\x1b\\PR #123\x1b]8;;\x1b\\',
     );
   });
 

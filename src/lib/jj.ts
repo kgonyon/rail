@@ -139,9 +139,22 @@ export function createJjOperations(deps: JjOperationsDependencies = { jjExec }) 
       validateJjRef(parentRef, 'parent ref');
 
       try {
-        const output = await deps.jjExec(path, buildUnmergedChangesCommand(parentRef));
-        const hasChanges = output.trim().length > 0;
-        return { ...CLEAN_STATS, isDirty: hasChanges, localState: hasChanges ? 'changed' : 'clean' };
+        const statOutput = await deps.jjExec(path, buildDiffStatCommand(parentRef));
+        const revisionsOutput = await deps.jjExec(path, buildRevisionCountCommand(parentRef));
+        const diffStats = parseJjDiffStatOutput(statOutput);
+        const revisions = parseJjRevisionCount(revisionsOutput);
+        const isDirty = diffStats.fileCount > 0 || revisions > 0;
+
+        return {
+          ...CLEAN_STATS,
+          fileCount: diffStats.fileCount,
+          stagedFiles: diffStats.fileCount,
+          insertions: diffStats.insertions,
+          deletions: diffStats.deletions,
+          isDirty,
+          commitsAhead: revisions,
+          localState: isDirty ? 'changed' : 'clean',
+        };
       } catch {
         return { ...CLEAN_STATS, localState: 'unknown', openPrs: { state: 'unavailable' } };
       }
@@ -246,10 +259,43 @@ function validateJjRef(ref: string, label: string): void {
   }
 }
 
-function buildUnmergedChangesCommand(parentRef: string): string {
+function buildRevisionCountCommand(parentRef: string): string {
+  return `log -r ${shellQuote(buildUnmergedChangesRevset(parentRef))} --count`;
+}
+
+function buildDiffStatCommand(parentRef: string): string {
+  return `diff --from ${shellQuote(parentRef)} --to @ --stat`;
+}
+
+function buildUnmergedChangesRevset(parentRef: string): string {
   const revset = `((ancestors(@) ~ ancestors(${parentRef})) ~ empty())`;
-  const template = 'commit_id.short() ++ "\\n"';
-  return `log -r ${shellQuote(revset)} --no-graph --limit 1 --template ${shellQuote(template)}`;
+  return revset;
+}
+
+/** @internal */
+export function parseJjDiffStatOutput(output: string): {
+  fileCount: number;
+  insertions: number;
+  deletions: number;
+} {
+  const summary = output.trim().split('\n').at(-1)?.trim() ?? '';
+  if (!summary) return { fileCount: 0, insertions: 0, deletions: 0 };
+
+  const fileCount = Number.parseInt(summary.match(/(\d+) files? changed/)?.[1] ?? '0', 10);
+  const insertions = Number.parseInt(summary.match(/(\d+) insertions?\(\+\)/)?.[1] ?? '0', 10);
+  const deletions = Number.parseInt(summary.match(/(\d+) deletions?\(-\)/)?.[1] ?? '0', 10);
+
+  return {
+    fileCount: Number.isNaN(fileCount) ? 0 : fileCount,
+    insertions: Number.isNaN(insertions) ? 0 : insertions,
+    deletions: Number.isNaN(deletions) ? 0 : deletions,
+  };
+}
+
+/** @internal */
+export function parseJjRevisionCount(output: string): number {
+  const revisions = Number.parseInt(output.trim(), 10);
+  return Number.isNaN(revisions) ? 0 : revisions;
 }
 
 function shellQuote(value: string): string {

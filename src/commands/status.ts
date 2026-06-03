@@ -236,12 +236,12 @@ function appendPrLines(
   }
 }
 
-interface FeatureRender {
+export interface FeatureRender {
   wt: VcsFeature;
   stats: VcsFeatureStatus;
 }
 
-interface PrintFeatureOptions {
+export interface PrintFeatureOptions {
   allocations: PortAllocations;
   config: RailConfig;
   defaultBranch: string;
@@ -250,6 +250,11 @@ interface PrintFeatureOptions {
 }
 
 function printFeatureStatus(render: FeatureRender, options: PrintFeatureOptions): void {
+  consola.box(formatFeatureStatusMessage(render, options));
+}
+
+/** @internal */
+export function formatFeatureStatusMessage(render: FeatureRender, options: PrintFeatureOptions): string {
   const { wt, stats } = render;
   const { allocations, config, defaultBranch, hyperlinks, forgeDriver } = options;
   const feature = getFeatureDisplayName(wt);
@@ -265,18 +270,17 @@ function printFeatureStatus(render: FeatureRender, options: PrintFeatureOptions)
     reviewLabelPlural: forgeDriver.reviewLabelPlural,
   });
 
-  console.log(`  ${feature}`);
-  console.log(`    ${refDisplay.label}: ${refDisplay.value}`);
-  console.log(`    Ports:  ${portStr}`);
-  if (lines.length === 1) {
-    console.log(`    Status: ${lines[0]}`);
-  } else {
-    console.log(`    Status:`);
-    for (const line of lines) {
-      console.log(`      ${line}`);
-    }
-  }
-  console.log('');
+  return [
+    feature,
+    `${refDisplay.label}: ${refDisplay.value}`,
+    `Ports:  ${portStr}`,
+    ...formatStatusMessageLines(lines),
+  ].join('\n');
+}
+
+function formatStatusMessageLines(lines: string[]): string[] {
+  if (lines.length === 1) return [`Status: ${lines[0]}`];
+  return ['Status:', ...lines.map((line) => `  ${line}`)];
 }
 
 /** @internal */

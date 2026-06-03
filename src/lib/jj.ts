@@ -1,4 +1,3 @@
-import { rm } from 'fs/promises';
 import consola from 'consola';
 import { basename } from 'path';
 import { isSafeParentRefName, validateFeatureName } from './config';
@@ -8,7 +7,6 @@ import type { WorktreeInfo, WorktreeStats } from './git';
 
 interface JjOperationsDependencies {
   jjExec: typeof jjExec;
-  rm: typeof rm;
 }
 
 const CLEAN_STATS: WorktreeStats = {
@@ -49,6 +47,10 @@ export async function deleteJjBookmark(root: string, bookmark: string): Promise<
   return createJjOperations().deleteJjBookmark(root, bookmark);
 }
 
+export async function jjBookmarkExists(root: string, bookmark: string): Promise<boolean> {
+  return createJjOperations().jjBookmarkExists(root, bookmark);
+}
+
 export async function listJjWorkspaces(root: string): Promise<WorktreeInfo[]> {
   return createJjOperations().listJjWorkspaces(root);
 }
@@ -58,7 +60,7 @@ export async function getJjWorkspaceStats(path: string): Promise<WorktreeStats> 
 }
 
 /** @internal */
-export function createJjOperations(deps: JjOperationsDependencies = { jjExec, rm }) {
+export function createJjOperations(deps: JjOperationsDependencies = { jjExec }) {
   return {
     async refreshJjParent(root: string, parentRef: string): Promise<void> {
       validateJjRef(parentRef, 'parent ref');
@@ -104,19 +106,21 @@ export function createJjOperations(deps: JjOperationsDependencies = { jjExec, rm
       }
     },
 
-    async removeJjWorkspace(root: string, treePath: string, feature: string): Promise<void> {
+    async removeJjWorkspace(root: string, _treePath: string, feature: string): Promise<void> {
       validateFeatureName(feature);
       const workspaceName = getFeatureDirName(feature);
-      try {
-        await deps.jjExec(root, `workspace forget ${workspaceName}`);
-      } catch {
-        await deps.rm(treePath, { force: true, recursive: true });
-      }
+      await deps.jjExec(root, `workspace forget -- ${workspaceName}`);
     },
 
     async deleteJjBookmark(root: string, bookmark: string): Promise<void> {
       validateJjRef(bookmark, 'bookmark');
       await deps.jjExec(root, `bookmark delete -- ${bookmark}`);
+    },
+
+    async jjBookmarkExists(root: string, bookmark: string): Promise<boolean> {
+      validateJjRef(bookmark, 'bookmark');
+      const output = await deps.jjExec(root, `bookmark list ${bookmark}`);
+      return output.split('\n').some((line) => line.startsWith(`${bookmark}:`));
     },
 
     async listJjWorkspaces(root: string): Promise<WorktreeInfo[]> {

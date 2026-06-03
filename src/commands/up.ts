@@ -1,5 +1,7 @@
 import { defineCommand } from 'citty';
 import consola from 'consola';
+import { mkdir } from 'fs/promises';
+import { dirname } from 'path';
 import { getWorktreePath } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { validateFeatureName } from '../lib/config';
@@ -67,6 +69,8 @@ export default defineCommand({
 
     consola.start(`Setting up feature: ${feature}`);
 
+    await ensureWorktreesDir(treePath);
+
     await vcsDriver.createFeature({
       root,
       path: treePath,
@@ -109,4 +113,9 @@ function printSummary(
       `Path:     ${treePath}`,
     ].join('\n'),
   );
+}
+
+/** @internal */
+export async function ensureWorktreesDir(treePath: string): Promise<void> {
+  await mkdir(dirname(treePath), { recursive: true });
 }

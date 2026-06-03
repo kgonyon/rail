@@ -48,6 +48,7 @@ import {
   parseGhPrListJson,
   refreshFromOrigin,
   fetchFromOrigin,
+  branchExists,
   deleteBranch,
   __resetGhAvailableCache,
 } from './git';
@@ -548,6 +549,34 @@ describe('deleteBranch', () => {
     gitExecHandler = () => Promise.reject(new Error('should not run'));
 
     await expect(deleteBranch('/repo', 'feature/demo;rm')).rejects.toThrow(/Unsafe branch ref/);
+  });
+});
+
+describe('branchExists', () => {
+  it('checks for a safe local branch ref', async () => {
+    const calls: Array<{ root: string; args: string }> = [];
+    gitExecHandler = (root, args) => {
+      calls.push({ root, args });
+      return Promise.resolve('abc123');
+    };
+
+    await expect(branchExists('/repo', 'feature/demo')).resolves.toBe(true);
+
+    expect(calls).toEqual([
+      { root: '/repo', args: 'rev-parse --verify refs/heads/feature/demo' },
+    ]);
+  });
+
+  it('returns false when the branch ref is missing', async () => {
+    gitExecHandler = () => Promise.reject(new Error('missing branch'));
+
+    await expect(branchExists('/repo', 'feature/missing')).resolves.toBe(false);
+  });
+
+  it('rejects unsafe branch refs before invoking git', async () => {
+    gitExecHandler = () => Promise.reject(new Error('should not run'));
+
+    await expect(branchExists('/repo', 'feature/demo;rm')).rejects.toThrow(/Unsafe branch ref/);
   });
 });
 

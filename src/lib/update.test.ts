@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   formatUpdateWarning,
   isCacheStale,
+  isUpdateAvailable,
   parseBrewInfo,
   parseGitHubRelease,
   shouldSkipUpdateCheck,
@@ -38,6 +39,12 @@ describe('update cache helpers', () => {
 
   it('formats cached update warnings', () => {
     expect(formatUpdateWarning(makeCache('2026-05-21T00:00:00Z'))).toContain('rail 1.2.3');
+  });
+
+  it('rechecks cached latest versions against the running version', () => {
+    const cache = makeCache('2026-05-21T00:00:00Z');
+    expect(isUpdateAvailable(cache, '1.2.2')).toBe(true);
+    expect(isUpdateAvailable(cache, '1.2.3')).toBe(false);
   });
 });
 

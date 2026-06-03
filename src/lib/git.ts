@@ -303,7 +303,7 @@ export async function refreshFromOrigin(root: string, parentRef?: string): Promi
     throw new Error(`Unsafe parent ref: ${branch}`);
   }
 
-  if (await checkBranchExists(root, branch)) {
+  if (await branchExists(root, branch)) {
     await refreshLocalBranch(root, branch);
     return;
   }

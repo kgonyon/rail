@@ -71,6 +71,11 @@ export function formatUpdateWarning(cache: UpdateCache): string {
   return `rail ${cache.latestVersion} is available. Run: rail upgrade`;
 }
 
+export function isUpdateAvailable(cache: UpdateCache, currentVersion: string): boolean {
+  if (!cache.latestVersion) return false;
+  return compareVersions(cache.latestVersion, currentVersion) > 0;
+}
+
 export async function fetchLatestRelease(
   timeoutMs = CHECK_TIMEOUT_MS,
   token = process.env.GITHUB_TOKEN,
@@ -107,7 +112,7 @@ async function warnAboutUpdatesUnchecked(options: {
   const next = isCacheStale(cache, options.now)
     ? await refreshCache(options.currentVersion, method, options.env, options.now, cache)
     : cache;
-  if (next?.updateAvailable) consola.warn(formatUpdateWarning(next));
+  if (next && isUpdateAvailable(next, options.currentVersion)) consola.warn(formatUpdateWarning(next));
 }
 
 async function refreshCache(

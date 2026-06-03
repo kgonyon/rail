@@ -1,7 +1,16 @@
-.PHONY: install check-bun deps
+.PHONY: install publish test typecheck check-bun deps
 
 install: check-bun deps
 	bun run install:local
+
+publish: check-bun deps typecheck test
+	@sh .ci/publish.sh
+
+test: check-bun deps
+	bun test
+
+typecheck: check-bun deps
+	bun run typecheck
 
 check-bun:
 	@command -v bun >/dev/null 2>&1 || { \

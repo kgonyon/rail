@@ -48,9 +48,9 @@ export async function addWorktree(
   startPoint?: string,
 ): Promise<void> {
   const branch = `${branchPrefix}${feature}`;
-  const branchExists = await checkBranchExists(root, branch);
+  const hasBranch = await branchExists(root, branch);
 
-  if (branchExists) {
+  if (hasBranch) {
     try {
       await $`git -C ${root} worktree add ${treePath} ${branch}`.quiet();
     } catch (err) {
@@ -78,7 +78,11 @@ export async function addWorktree(
   }
 }
 
-async function checkBranchExists(root: string, branch: string): Promise<boolean> {
+export async function branchExists(root: string, branch: string): Promise<boolean> {
+  if (!isSafeRefName(branch)) {
+    throw new Error(`Unsafe branch ref: ${branch}`);
+  }
+
   try {
     await gitExec(root, `rev-parse --verify refs/heads/${branch}`);
     return true;

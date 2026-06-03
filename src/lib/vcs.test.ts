@@ -38,6 +38,10 @@ const deps = {
     });
     return Promise.resolve();
   },
+  branchExists: (root: string, branch: string) => {
+    calls.push({ name: 'branchExists', args: [root, branch] });
+    return Promise.resolve(branch === 'feature/demo');
+  },
   deleteBranch: (root: string, branch: string) => {
     calls.push({ name: 'deleteBranch', args: [root, branch] });
     return Promise.resolve();
@@ -105,6 +109,7 @@ describe('createGitVcsDriver', () => {
   it('removes, lists, refreshes, and fetches configured parents through Git operations', async () => {
     await driver.removeFeature('/repo', '/repo/.trees/demo', 'demo');
     await driver.pruneFeature('/repo', 'feature/', 'demo');
+    await expect(driver.featureRefExists('/repo', 'feature/', 'demo')).resolves.toBe(true);
     await expect(driver.listFeatures('/repo')).resolves.toEqual([
       { path: '/repo/.trees/demo', head: 'abc', branch: 'refs/heads/feature/demo' },
     ]);
@@ -114,6 +119,7 @@ describe('createGitVcsDriver', () => {
     expect(calls).toEqual([
       { name: 'removeWorktree', args: ['/repo', '/repo/.trees/demo'] },
       { name: 'deleteBranch', args: ['/repo', 'feature/demo'] },
+      { name: 'branchExists', args: ['/repo', 'feature/demo'] },
       { name: 'listWorktrees', args: ['/repo'] },
       { name: 'refreshFromOrigin', args: ['/repo', 'release'] },
       { name: 'fetchFromOrigin', args: ['/repo', 'origin/develop'] },
@@ -164,6 +170,10 @@ const jjDeps = {
       args: [root, path, bookmarkPrefix, feature, parentRef],
     });
     return Promise.resolve();
+  },
+  jjBookmarkExists: (root: string, bookmark: string) => {
+    calls.push({ name: 'jjBookmarkExists', args: [root, bookmark] });
+    return Promise.resolve(bookmark === 'feature/demo');
   },
   deleteJjBookmark: (root: string, bookmark: string) => {
     calls.push({ name: 'deleteJjBookmark', args: [root, bookmark] });
@@ -228,6 +238,7 @@ describe('createJjVcsDriver', () => {
   it('removes, lists, and stats JJ workspaces without bookmark deletion', async () => {
     await jjDriver.removeFeature('/repo', '/repo/.trees/demo', 'demo');
     await jjDriver.pruneFeature('/repo', 'feature/', 'demo');
+    await expect(jjDriver.featureRefExists('/repo', 'feature/', 'demo')).resolves.toBe(true);
     await expect(jjDriver.listFeatures('/repo')).resolves.toEqual([
       { path: '/repo/.trees/demo', head: 'feature/demo', branch: 'feature/demo' },
     ]);
@@ -239,6 +250,7 @@ describe('createJjVcsDriver', () => {
     expect(calls).toEqual([
       { name: 'removeJjWorkspace', args: ['/repo', '/repo/.trees/demo', 'demo'] },
       { name: 'deleteJjBookmark', args: ['/repo', 'feature/demo'] },
+      { name: 'jjBookmarkExists', args: ['/repo', 'feature/demo'] },
       { name: 'listJjWorkspaces', args: ['/repo'] },
       { name: 'getJjWorkspaceStats', args: ['/repo/.trees/demo'] },
     ]);

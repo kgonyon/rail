@@ -1,10 +1,7 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 import { createJjOperations, parseJjWorkspaceList } from './jj';
-import type { PathLike } from 'fs';
-import type { RmOptions } from 'fs';
 
 const calls: Array<{ cwd: string; args: string }> = [];
-const removed: Array<{ path: PathLike; options: unknown }> = [];
 let failBookmarkCreate = false;
 let failWorkspaceForget = false;
 
@@ -20,20 +17,21 @@ const ops = createJjOperations({
     if (args === 'workspace list') {
       return Promise.resolve('main: /repo\ndemo: abc123 feature/demo* /repo/.trees/demo\n');
     }
+    if (args === 'bookmark list feature/demo') {
+      return Promise.resolve('feature/demo: abc123\n');
+    }
+    if (args.startsWith('bookmark list ')) {
+      return Promise.resolve('');
+    }
     if (args === 'diff --stat') {
       return Promise.resolve('M file.ts | 1 +\n');
     }
     return Promise.resolve('');
   },
-  rm(path: PathLike, options?: RmOptions) {
-    removed.push({ path, options });
-    return Promise.resolve();
-  },
 });
 
 beforeEach(() => {
   calls.length = 0;
-  removed.length = 0;
   failBookmarkCreate = false;
   failWorkspaceForget = false;
 });
@@ -88,7 +86,7 @@ describe('JJ operations', () => {
         cwd: '/repo/.trees/feature+demo',
         args: 'bookmark create feature/demo --revision @',
       },
-      { cwd: '/repo', args: 'workspace forget feature+demo' },
+      { cwd: '/repo', args: 'workspace forget -- feature+demo' },
     ]);
   });
 
@@ -102,17 +100,23 @@ describe('JJ operations', () => {
     ]);
   });
 
-  it('forgets a workspace without deleting the bookmark and removes the directory as fallback', async () => {
+  it('forgets a workspace without deleting the bookmark or directory', async () => {
     await ops.removeJjWorkspace('/repo', '/repo/.trees/demo', 'demo');
-    failWorkspaceForget = true;
-    await ops.removeJjWorkspace('/repo', '/repo/.trees/stale', 'stale');
 
     expect(calls).toEqual([
-      { cwd: '/repo', args: 'workspace forget demo' },
-      { cwd: '/repo', args: 'workspace forget stale' },
+      { cwd: '/repo', args: 'workspace forget -- demo' },
     ]);
-    expect(removed).toEqual([
-      { path: '/repo/.trees/stale', options: { force: true, recursive: true } },
+  });
+
+  it('propagates workspace forget failures to leave cleanup decisions to callers', async () => {
+    failWorkspaceForget = true;
+
+    await expect(ops.removeJjWorkspace('/repo', '/repo/.trees/stale', 'stale')).rejects.toThrow(
+      'workspace missing',
+    );
+
+    expect(calls).toEqual([
+      { cwd: '/repo', args: 'workspace forget -- stale' },
     ]);
   });
 
@@ -121,6 +125,16 @@ describe('JJ operations', () => {
 
     expect(calls).toEqual([
       { cwd: '/repo', args: 'bookmark delete -- feature/demo' },
+    ]);
+  });
+
+  it('checks whether a local JJ bookmark exists', async () => {
+    await expect(ops.jjBookmarkExists('/repo', 'feature/demo')).resolves.toBe(true);
+    await expect(ops.jjBookmarkExists('/repo', 'missing')).resolves.toBe(false);
+
+    expect(calls).toEqual([
+      { cwd: '/repo', args: 'bookmark list feature/demo' },
+      { cwd: '/repo', args: 'bookmark list missing' },
     ]);
   });
 
@@ -135,6 +149,9 @@ describe('JJ operations', () => {
     await expect(
       ops.addJjWorkspace('/repo', '/repo/.trees/demo', 'feature/', '../demo', 'main@origin'),
     ).rejects.toThrow(/Invalid feature name/);
+    await expect(ops.jjBookmarkExists('/repo', 'feature/demo;rm')).rejects.toThrow(
+      /Unsafe JJ bookmark/,
+    );
     await expect(ops.removeJjWorkspace('/repo', '/repo/.trees/demo', '../demo')).rejects.toThrow(
       /Invalid feature name/,
     );
@@ -172,9 +189,6 @@ describe('JJ operations', () => {
       jjExec() {
         return Promise.resolve('');
       },
-      rm() {
-        return Promise.resolve();
-      },
     });
     await expect(cleanOps.getJjWorkspaceStats('/repo/.trees/demo')).resolves.toMatchObject({
       isDirty: false,
@@ -184,9 +198,6 @@ describe('JJ operations', () => {
     const unknownOps = createJjOperations({
       jjExec() {
         return Promise.reject(new Error('jj failed'));
-      },
-      rm() {
-        return Promise.resolve();
       },
     });
     await expect(unknownOps.getJjWorkspaceStats('/repo/.trees/demo')).resolves.toMatchObject({

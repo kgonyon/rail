@@ -154,6 +154,20 @@ describe('parseGlabMrListJson', () => {
       { number: 1, url: 'https://e/1' },
     ]);
   });
+
+  it('keeps opened GitLab entries and drops closed or merged entries', () => {
+    const output = JSON.stringify([
+      { iid: 1, state: 'opened', web_url: 'https://e/1' },
+      { iid: 2, state: 'open', web_url: 'https://e/2' },
+      { iid: 3, state: 'merged', web_url: 'https://e/3' },
+      { iid: 4, state: 'closed', web_url: 'https://e/4' },
+    ]);
+
+    expect(parseGlabMrListJson(output)).toEqual([
+      { number: 1, url: 'https://e/1' },
+      { number: 2, url: 'https://e/2' },
+    ]);
+  });
 });
 
 describe('getOpenGitHubReviews', () => {
@@ -234,7 +248,7 @@ describe('getOpenGitLabReviews', () => {
     });
     expect(glabExecCalls[1]).toEqual({
       cwd: '/fake/path',
-      args: 'mr list --source-branch feature/x --state opened --output json',
+      args: 'mr list --source-branch feature/x --output json',
     });
   });
 

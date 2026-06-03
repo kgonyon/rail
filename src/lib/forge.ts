@@ -127,11 +127,17 @@ function toOpenReviewInfo(entry: unknown): OpenReviewInfo | null {
 function toOpenGitLabReviewInfo(entry: unknown): OpenReviewInfo | null {
   if (typeof entry !== 'object' || entry === null) return null;
   const record = entry as Record<string, unknown>;
+  if (!isOpenGitLabReviewState(record.state)) return null;
   const num = record.iid;
   const url = record.web_url ?? record.webUrl ?? record.url;
   if (typeof num !== 'number' || !Number.isInteger(num) || num <= 0) return null;
   if (typeof url !== 'string' || !isSafeReviewUrl(url)) return null;
   return { number: num, url };
+}
+
+function isOpenGitLabReviewState(state: unknown): boolean {
+  if (state === undefined) return true;
+  return state === 'opened' || state === 'open';
 }
 
 const REF_NAME_PATTERN = /^[A-Za-z0-9._\-/]+$/;
@@ -204,7 +210,7 @@ export async function listOpenGitLabReviews(
   try {
     const out = await glabExec(
       treePath,
-      `mr list --source-branch ${normalized} --state opened --output json`,
+      `mr list --source-branch ${normalized} --output json`,
     );
     const reviews = parseGlabMrListJson(out);
     if (reviews === null) return { state: 'error' };

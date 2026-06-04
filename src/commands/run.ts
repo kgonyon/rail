@@ -3,7 +3,7 @@ import consola from 'consola';
 import { join } from 'path';
 import { getWorktreePath, resolveRelativePath } from '../lib/paths';
 import { loadConfig } from '../lib/config';
-import { loadPortAllocations, getPortsForFeature } from '../lib/ports';
+import { loadFeatureAllocations, getPortsForFeature } from '../lib/ports';
 import { resolveFeature } from '../lib/detect';
 import { runHooks } from '../lib/hooks';
 import { runCommand } from '../lib/script';
@@ -128,7 +128,7 @@ export function resolveCommandPath(command: string, root: string): string {
 }
 
 function lookupPorts(root: string, feature: string, config: RailConfig): number[] {
-  const allocations = loadPortAllocations(root);
+  const allocations = loadFeatureAllocations(root);
   const allocation = allocations.features[feature];
 
   if (!allocation) {

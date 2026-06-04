@@ -14,7 +14,8 @@ type IgnoreDestination = RailConfig['setup']['ignore_destination'];
 type IgnoreEntryPredicate = (line: string) => boolean;
 
 const RAIL_LOCAL_HEADER = '# rail local files';
-const TRACKED_RAIL_IGNORE_ENTRIES = ['.rail/local.yaml', '.rail/port_allocations.json'] as const;
+const TRACKED_RAIL_IGNORE_ENTRIES = ['.rail/local.yaml', '.rail/feature_allocations.json'] as const;
+const LEGACY_RAIL_IGNORE_ENTRIES = ['.rail/port_allocations.json', '/.rail/port_allocations.json'] as const;
 const UNTRACKED_RAIL_IGNORE_ENTRIES = ['.rail/'] as const;
 const BROAD_RAIL_IGNORE_ENTRIES = [
   '.rail',
@@ -30,8 +31,9 @@ const BROAD_RAIL_IGNORE_ENTRY_SET = new Set<string>(BROAD_RAIL_IGNORE_ENTRIES);
 const TRACKED_RAIL_IGNORE_ENTRY_SET = new Set<string>([
   '.rail/local.yaml',
   '/.rail/local.yaml',
-  '.rail/port_allocations.json',
-  '/.rail/port_allocations.json',
+  '.rail/feature_allocations.json',
+  '/.rail/feature_allocations.json',
+  ...LEGACY_RAIL_IGNORE_ENTRIES,
 ]);
 
 export interface InitOptions {
@@ -514,7 +516,7 @@ export async function updateIgnoreRules(root: string, options: InitOptions): Pro
     await mkdir(join(root, '.git', 'info'), { recursive: true });
   }
 
-  const shouldRemove = options.trackRail ? isBroadRailIgnoreEntry : isTrackedRailIgnoreEntry;
+  const shouldRemove = options.trackRail ? isObsoleteTrackedRailIgnoreEntry : isTrackedRailIgnoreEntry;
   await repairObsoleteRailIgnores(root, ignorePath, entries, shouldRemove);
 
   const existing = existsSync(ignorePath)
@@ -625,6 +627,12 @@ function isTrackedRailIgnoreEntry(line: string): boolean {
   if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('!')) return false;
 
   return TRACKED_RAIL_IGNORE_ENTRY_SET.has(trimmed);
+}
+
+function isObsoleteTrackedRailIgnoreEntry(line: string): boolean {
+  const trimmed = line.trim();
+
+  return isBroadRailIgnoreEntry(line) || (LEGACY_RAIL_IGNORE_ENTRIES as readonly string[]).includes(trimmed);
 }
 
 /** @internal */

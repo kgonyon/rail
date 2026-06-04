@@ -4,12 +4,12 @@ import { basename } from 'path';
 import { isatty } from 'tty';
 import { formatPathForDisplay, getFeatureNameFromDirName, isRailProject } from '../lib/paths';
 import { loadConfig } from '../lib/config';
-import { loadPortAllocations, getPortsForFeature } from '../lib/ports';
+import { loadFeatureAllocations, getPortsForFeature } from '../lib/ports';
 import { getForgeDriver } from '../lib/forge';
 import { getVcsDriver, gitVcsDriver } from '../lib/vcs';
 import type { VcsDriver, VcsFeature, VcsFeatureStatus } from '../lib/vcs';
 import type { ForgeDriver, OpenReviewsResult } from '../lib/forge';
-import type { PortAllocations, RailConfig } from '../types/config';
+import type { FeatureAllocations, RailConfig } from '../types/config';
 
 export default defineCommand({
   meta: {
@@ -26,7 +26,7 @@ export default defineCommand({
 
     const config = loadConfig(root);
     const vcsDriver = getVcsDriver(config.vcs);
-    const allocations = loadPortAllocations(root);
+    const allocations = loadFeatureAllocations(root);
     const worktrees = await vcsDriver.listFeatures(root);
     const treesDir = config.worktrees.dir.replace(/\/$/, '');
 
@@ -237,7 +237,7 @@ export interface FeatureRender {
 }
 
 export interface PrintFeatureOptions {
-  allocations: PortAllocations;
+  allocations: FeatureAllocations;
   config: RailConfig;
   defaultBranch: string;
   hyperlinks: boolean;

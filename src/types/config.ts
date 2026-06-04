@@ -51,10 +51,11 @@ export interface RailConfig {
   secrets?: Record<string, string>;
 }
 
-export interface PortAllocation {
+export interface FeatureAllocation {
   index: number;
+  setupSkipped?: boolean;
 }
 
-export interface PortAllocations {
-  features: Record<string, PortAllocation>;
+export interface FeatureAllocations {
+  features: Record<string, FeatureAllocation>;
 }

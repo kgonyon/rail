@@ -6,11 +6,11 @@ import {
   findRailProjectRoot,
   formatPathForDisplay,
   getConfigPath,
+  getFeatureAllocationsPath,
   getFeatureDirName,
   getFeatureNameFromDirName,
   getGitRoot,
   getLocalConfigPath,
-  getPortAllocationsPath,
   getUserConfigPath,
   getWorktreePath,
   isRelativePath,
@@ -167,10 +167,10 @@ describe('getLocalConfigPath', () => {
   });
 });
 
-describe('getPortAllocationsPath', () => {
-  it('returns .rail/port_allocations.json under root', () => {
-    expect(getPortAllocationsPath('/projects/app')).toBe(
-      join('/projects/app', '.rail', 'port_allocations.json'),
+describe('getFeatureAllocationsPath', () => {
+  it('returns .rail/feature_allocations.json under root', () => {
+    expect(getFeatureAllocationsPath('/projects/app')).toBe(
+      join('/projects/app', '.rail', 'feature_allocations.json'),
     );
   });
 });

@@ -113,7 +113,11 @@ export function getLocalConfigPath(root: string): string {
   return join(root, '.rail', 'local.yaml');
 }
 
-export function getPortAllocationsPath(root: string): string {
+export function getFeatureAllocationsPath(root: string): string {
+  return join(root, '.rail', 'feature_allocations.json');
+}
+
+export function getLegacyPortAllocationsPath(root: string): string {
   return join(root, '.rail', 'port_allocations.json');
 }
 

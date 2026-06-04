@@ -1,21 +1,23 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'fs';
 import { dirname } from 'path';
-import { getPortAllocationsPath } from './paths';
-import type { PortAllocations, PortConfig } from '../types/config';
+import { getFeatureAllocationsPath, getLegacyPortAllocationsPath } from './paths';
+import type { FeatureAllocations, PortConfig } from '../types/config';
 
-export function loadPortAllocations(root: string): PortAllocations {
-  const path = getPortAllocationsPath(root);
+export function loadFeatureAllocations(root: string): FeatureAllocations {
+  const path = getFeatureAllocationsPath(root);
 
   if (!existsSync(path)) {
-    return { features: {} };
+    return loadLegacyFeatureAllocations(root);
   }
 
   const raw = readFileSync(path, 'utf-8');
-  return JSON.parse(raw) as PortAllocations;
+  const allocations = JSON.parse(raw) as FeatureAllocations;
+  removeLegacyFeatureAllocations(root);
+  return allocations;
 }
 
-export function savePortAllocations(root: string, allocations: PortAllocations): void {
-  const path = getPortAllocationsPath(root);
+export function saveFeatureAllocations(root: string, allocations: FeatureAllocations): void {
+  const path = getFeatureAllocationsPath(root);
   const dir = dirname(path);
 
   if (!existsSync(dir)) {
@@ -23,10 +25,11 @@ export function savePortAllocations(root: string, allocations: PortAllocations):
   }
 
   writeFileSync(path, JSON.stringify(allocations, null, 2) + '\n');
+  removeLegacyFeatureAllocations(root);
 }
 
 export function allocatePorts(root: string, feature: string, portConfig: PortConfig): number {
-  const allocations = loadPortAllocations(root);
+  const allocations = loadFeatureAllocations(root);
 
   if (allocations.features[feature]) {
     return allocations.features[feature].index;
@@ -48,15 +51,26 @@ export function allocatePorts(root: string, feature: string, portConfig: PortCon
   }
 
   allocations.features[feature] = { index };
-  savePortAllocations(root, allocations);
+  saveFeatureAllocations(root, allocations);
 
   return index;
 }
 
+export function setSetupSkipped(root: string, feature: string, setupSkipped: boolean): void {
+  const allocations = loadFeatureAllocations(root);
+  const allocation = allocations.features[feature];
+
+  if (!allocation) return;
+
+  const { setupSkipped: _setupSkipped, ...rest } = allocation;
+  allocations.features[feature] = setupSkipped ? { ...rest, setupSkipped: true } : rest;
+  saveFeatureAllocations(root, allocations);
+}
+
 export function deallocatePorts(root: string, feature: string): void {
-  const allocations = loadPortAllocations(root);
+  const allocations = loadFeatureAllocations(root);
   delete allocations.features[feature];
-  savePortAllocations(root, allocations);
+  saveFeatureAllocations(root, allocations);
 }
 
 export function getPortsForFeature(portConfig: PortConfig, index: number): number[] {
@@ -67,4 +81,19 @@ export function getPortsForFeature(portConfig: PortConfig, index: number): numbe
   }
 
   return ports;
+}
+
+function loadLegacyFeatureAllocations(root: string): FeatureAllocations {
+  const legacyPath = getLegacyPortAllocationsPath(root);
+
+  if (!existsSync(legacyPath)) return { features: {} };
+
+  const raw = readFileSync(legacyPath, 'utf-8');
+  const allocations = JSON.parse(raw) as FeatureAllocations;
+  saveFeatureAllocations(root, allocations);
+  return allocations;
+}
+
+function removeLegacyFeatureAllocations(root: string): void {
+  rmSync(getLegacyPortAllocationsPath(root), { force: true });
 }

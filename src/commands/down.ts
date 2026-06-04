@@ -4,11 +4,12 @@ import { defineCommand } from 'citty';
 import consola from 'consola';
 import { formatPathForDisplay, getWorktreePath } from '../lib/paths';
 import { loadConfig } from '../lib/config';
-import { loadPortAllocations, getPortsForFeature, deallocatePorts } from '../lib/ports';
+import { loadFeatureAllocations, getPortsForFeature, deallocatePorts } from '../lib/ports';
 import { getVcsDriver, gitVcsDriver } from '../lib/vcs';
 import { resolveFeature } from '../lib/detect';
 import { runHooks } from '../lib/hooks';
 import { runScript } from '../lib/script';
+import { formatErrorMessage } from '../lib/shell';
 import type { ScriptContext } from '../lib/script';
 import type { VcsDriver } from '../lib/vcs';
 import type { PortConfig } from '../types/config';
@@ -54,10 +55,7 @@ export default defineCommand({
     if (target.hasTree) {
       await runHooks('down', context);
 
-      if (config.scripts?.cleanup) {
-        consola.info('Running cleanup script...');
-        await runScript(config.scripts.cleanup, context);
-      }
+      await runCleanupScript(config.scripts?.cleanup, context, target.setupSkipped);
 
       await vcsDriver.removeFeature(root, treePath, feature);
       consola.info('Removed worktree');
@@ -68,7 +66,7 @@ export default defineCommand({
       consola.info('No worktree found; continuing prune cleanup');
     }
 
-    if (target.hasPortAllocation) {
+    if (target.hasFeatureAllocation) {
       deallocatePorts(root, feature);
       consola.info('Deallocated ports');
     }
@@ -98,15 +96,16 @@ interface DownTarget {
   branchPrefix: string;
   feature: string;
   hasFeatureRef: boolean;
-  hasPortAllocation: boolean;
+  hasFeatureAllocation: boolean;
   hasTree: boolean;
   ports: number[];
+  setupSkipped: boolean;
   treePath: string;
 }
 
 async function getDownTarget(options: DownTargetOptions): Promise<DownTarget> {
   const branchPrefix = options.config.worktrees.branch_prefix ?? '';
-  const portAllocation = lookupPortAllocation(options.root, options.feature, options.config);
+  const featureAllocation = lookupFeatureAllocation(options.root, options.feature, options.config);
   const hasFeatureRef = await options.vcsDriver.featureRefExists(
     options.root,
     branchPrefix,
@@ -117,16 +116,17 @@ async function getDownTarget(options: DownTargetOptions): Promise<DownTarget> {
     branchPrefix,
     feature: options.feature,
     hasFeatureRef,
-    hasPortAllocation: portAllocation.hasAllocation,
+    hasFeatureAllocation: featureAllocation.hasAllocation,
     hasTree: existsSync(options.treePath),
-    ports: portAllocation.ports,
+    ports: featureAllocation.ports,
+    setupSkipped: featureAllocation.setupSkipped,
     treePath: options.treePath,
   };
 }
 
 /** @internal */
 export function validateDownTarget(
-  target: Pick<DownTarget, 'feature' | 'hasFeatureRef' | 'hasPortAllocation' | 'hasTree' | 'treePath'>,
+  target: Pick<DownTarget, 'feature' | 'hasFeatureRef' | 'hasFeatureAllocation' | 'hasTree' | 'treePath'>,
   shouldPrune: boolean,
 ): void {
   if (target.hasTree) return;
@@ -137,24 +137,28 @@ export function validateDownTarget(
         'Check the feature name with "rail status".',
     );
   }
-  if (target.hasFeatureRef || target.hasPortAllocation) return;
+  if (target.hasFeatureRef || target.hasFeatureAllocation) return;
 
   throw new Error(
-    `No worktree, port allocation, or feature ref found for "${target.feature}". Check the feature name with "rail status".`,
+    `No worktree, feature allocation, or feature ref found for "${target.feature}". Check the feature name with "rail status".`,
   );
 }
 
-function lookupPortAllocation(
+function lookupFeatureAllocation(
   root: string,
   feature: string,
   config: { port: PortConfig },
-): { hasAllocation: boolean; ports: number[] } {
-  const allocations = loadPortAllocations(root);
+): { hasAllocation: boolean; ports: number[]; setupSkipped: boolean } {
+  const allocations = loadFeatureAllocations(root);
   const allocation = allocations.features[feature];
 
-  if (!allocation) return { hasAllocation: false, ports: [] };
+  if (!allocation) return { hasAllocation: false, ports: [], setupSkipped: false };
 
-  return { hasAllocation: true, ports: getPortsForFeature(config.port, allocation.index) };
+  return {
+    hasAllocation: true,
+    ports: getPortsForFeature(config.port, allocation.index),
+    setupSkipped: allocation.setupSkipped === true,
+  };
 }
 
 /** @internal */
@@ -163,4 +167,23 @@ export async function removeRemainingFeatureTree(treePath: string): Promise<bool
 
   await rm(treePath, { force: true, recursive: true });
   return true;
+}
+
+async function runCleanupScript(
+  cleanupScript: string | undefined,
+  context: ScriptContext,
+  setupSkipped: boolean,
+): Promise<void> {
+  if (!cleanupScript) return;
+  if (setupSkipped) {
+    consola.info('Skipping cleanup script because setup was skipped');
+    return;
+  }
+
+  try {
+    consola.info('Running cleanup script...');
+    await runScript(cleanupScript, context);
+  } catch (error) {
+    consola.warn(`Cleanup script failed; continuing teardown.\n${formatErrorMessage(error)}`);
+  }
 }

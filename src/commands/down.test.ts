@@ -40,8 +40,8 @@ describe('down command source', () => {
     expect(() => validateDownTarget(makeDownTarget({ hasFeatureRef: true }), true)).not.toThrow();
   });
 
-  it('allows prune cleanup when only a stale port allocation remains', () => {
-    expect(() => validateDownTarget(makeDownTarget({ hasPortAllocation: true }), true)).not.toThrow();
+  it('allows prune cleanup when only a stale feature allocation remains', () => {
+    expect(() => validateDownTarget(makeDownTarget({ hasFeatureAllocation: true }), true)).not.toThrow();
   });
 
   it('rejects missing worktrees without prune', () => {
@@ -70,7 +70,7 @@ describe('down command source', () => {
 
   it('rejects prune cleanup when no cleanup target exists', () => {
     expect(() => validateDownTarget(makeDownTarget(), true)).toThrow(
-      /No worktree, port allocation, or feature ref found/,
+      /No worktree, feature allocation, or feature ref found/,
     );
   });
 });
@@ -79,7 +79,7 @@ function makeDownTarget(overrides: Partial<Parameters<typeof validateDownTarget>
   return {
     feature: 'demo',
     hasFeatureRef: false,
-    hasPortAllocation: false,
+    hasFeatureAllocation: false,
     hasTree: false,
     treePath: '/repo/trees/demo',
     ...overrides,

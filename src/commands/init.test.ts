@@ -209,7 +209,7 @@ describe('initializeRailProject', () => {
     expect(existsSync(join(root, '.rail', 'scripts', 'setup.sh'))).toBe(true);
     expect(existsSync(join(root, '.rail', 'scripts', 'cleanup.sh'))).toBe(true);
     expect(gitignore).toContain('.rail/local.yaml');
-    expect(gitignore).toContain('.rail/port_allocations.json');
+    expect(gitignore).toContain('.rail/feature_allocations.json');
     expect(gitignore).toContain('trees/');
   });
 
@@ -224,7 +224,7 @@ describe('initializeRailProject', () => {
 
     expect(existsSync(join(root, '.gitignore'))).toBe(false);
     expect(exclude).toContain('.rail/local.yaml');
-    expect(exclude).toContain('.rail/port_allocations.json');
+    expect(exclude).toContain('.rail/feature_allocations.json');
     expect(exclude).toContain('trees/');
   });
 
@@ -384,7 +384,7 @@ port:
     const root = makeTempRoot();
     mkdirSync(join(root, '.rail'), { recursive: true });
     writeFileSync(join(root, '.rail', 'config.yaml'), buildConfigContent('test-project'));
-    writeFileSync(join(root, '.gitignore'), '# existing\n.rail/local.yaml\n');
+    writeFileSync(join(root, '.gitignore'), '# existing\n.rail/local.yaml\n.rail/port_allocations.json\n');
 
     await initializeRailProject(root, 'test-project');
     await initializeRailProject(root, 'test-project');
@@ -392,7 +392,8 @@ port:
     const gitignore = readFileSync(join(root, '.gitignore'), 'utf-8');
 
     expect(gitignore.match(/\.rail\/local\.yaml/g)?.length).toBe(1);
-    expect(gitignore.match(/\.rail\/port_allocations\.json/g)?.length).toBe(1);
+    expect(gitignore.match(/\.rail\/feature_allocations\.json/g)?.length).toBe(1);
+    expect(gitignore).not.toContain('.rail/port_allocations.json');
     expect(gitignore.match(/^trees\/$/gm)?.length).toBe(1);
   });
 
@@ -412,7 +413,7 @@ port:
     expect(lines).not.toContain('.rail/**');
     expect(lines).toContain('node_modules/');
     expect(lines).toContain('.rail/local.yaml');
-    expect(lines).toContain('.rail/port_allocations.json');
+    expect(lines).toContain('.rail/feature_allocations.json');
   });
 
   it('repairs broad gitignore rail ignores when local ignores go to exclude', async () => {
@@ -433,7 +434,7 @@ port:
     expect(gitignoreLines).not.toContain('.rail/');
     expect(gitignoreLines).toContain('node_modules/');
     expect(exclude).toContain('.rail/local.yaml');
-    expect(exclude).toContain('.rail/port_allocations.json');
+    expect(exclude).toContain('.rail/feature_allocations.json');
   });
 
   it('removes narrow rail ignores when shared rail files should not be tracked', async () => {
@@ -455,6 +456,7 @@ port:
 
     expect(lines).not.toContain('.rail/local.yaml');
     expect(lines).not.toContain('.rail/port_allocations.json');
+    expect(lines).not.toContain('.rail/feature_allocations.json');
     expect(lines).toContain('.rail/');
     expect(lines).toContain('trees/');
     expect(lines).toContain('node_modules/');
@@ -500,7 +502,7 @@ trees/
 
 # rail local files
 .rail/local.yaml
-.rail/port_allocations.json
+.rail/feature_allocations.json
 /trees
 `);
 
@@ -511,12 +513,12 @@ trees/
     const excludeLines = exclude.split(/\r?\n/).map((line) => line.trim());
 
     expect(gitignore).toContain('.rail/local.yaml');
-    expect(gitignore).toContain('.rail/port_allocations.json');
+    expect(gitignore).toContain('.rail/feature_allocations.json');
     expect(gitignore).toContain('trees/');
     expect(excludeLines).toContain('*.local');
     expect(excludeLines).not.toContain('# rail local files');
     expect(excludeLines).not.toContain('.rail/local.yaml');
-    expect(excludeLines).not.toContain('.rail/port_allocations.json');
+    expect(excludeLines).not.toContain('.rail/feature_allocations.json');
     expect(excludeLines).not.toContain('/trees');
   });
 });

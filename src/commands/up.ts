@@ -1,16 +1,19 @@
 import { defineCommand } from 'citty';
 import consola from 'consola';
-import { mkdir } from 'fs/promises';
+import { existsSync } from 'fs';
+import { mkdir, rm } from 'fs/promises';
 import { dirname } from 'path';
 import { formatPathForDisplay, getWorktreePath } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { validateFeatureName } from '../lib/config';
-import { allocatePorts, getPortsForFeature } from '../lib/ports';
+import { allocatePorts, deallocatePorts, getPortsForFeature, setSetupSkipped } from '../lib/ports';
 import { getVcsDriver, gitVcsDriver } from '../lib/vcs';
 import { generateEnvFiles } from '../lib/env';
 import { runHooks } from '../lib/hooks';
 import { runScript } from '../lib/script';
+import { formatErrorMessage } from '../lib/shell';
 import type { ScriptContext } from '../lib/script';
+import type { VcsDriver } from '../lib/vcs';
 
 export default defineCommand({
   meta: {
@@ -31,6 +34,10 @@ export default defineCommand({
       type: 'boolean',
       description: 'Skip automatic parent refresh before creating the feature',
     },
+    skipSetup: {
+      type: 'boolean',
+      description: 'Skip the configured setup script for this feature',
+    },
   },
   async run({ args }) {
     const feature = args.feature;
@@ -40,16 +47,9 @@ export default defineCommand({
     validateFeatureName(feature);
 
     const effectiveParent = args.parent ?? config.default_parent;
+    const shouldSkipSetup = Boolean(args.skipSetup);
     if (config.auto_refresh && !args.noRefresh) {
-      try {
-        await vcsDriver.refreshParent(root, effectiveParent);
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        throw new Error(
-          `Failed to refresh parent "${effectiveParent}" before creating "${feature}".\n` +
-            `${detail}\n\nFix the refresh issue, or retry with \`rail up ${feature} --no-refresh\` to use current local state.`,
-        );
-      }
+      await refreshParentForUp(vcsDriver, root, effectiveParent, feature);
     }
 
     const parentRef = await vcsDriver.fetchParent(root, effectiveParent);
@@ -78,6 +78,7 @@ export default defineCommand({
       feature,
       parentRef,
     });
+    setSetupSkipped(root, feature, shouldSkipSetup);
     consola.info(`Created worktree at ${formatPathForDisplay(treePath)}`);
 
     consola.info(`Allocated ports: ${ports.join(', ')}`);
@@ -87,10 +88,16 @@ export default defineCommand({
       consola.info('Generated env files');
     }
 
-    if (config.scripts?.setup) {
-      consola.info('Running setup script...');
-      await runScript(config.scripts.setup, context);
-    }
+    await runSetupWithRollback({
+      cleanupScript: config.scripts?.cleanup,
+      context,
+      feature,
+      root,
+      setupScript: config.scripts?.setup,
+      shouldSkipSetup,
+      treePath,
+      vcsDriver,
+    });
 
     await runHooks('up', context);
 
@@ -118,4 +125,123 @@ function printSummary(
 /** @internal */
 export async function ensureWorktreesDir(treePath: string): Promise<void> {
   await mkdir(dirname(treePath), { recursive: true });
+}
+
+async function refreshParentForUp(
+  vcsDriver: VcsDriver,
+  root: string,
+  parentRef: string,
+  feature: string,
+): Promise<void> {
+  try {
+    await vcsDriver.refreshParent(root, parentRef);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Failed to refresh parent "${parentRef}" before creating "${feature}".\n` +
+        `${detail}\n\nFix the refresh issue, or retry with \`rail up ${feature} --no-refresh\` to use current local state.`,
+    );
+  }
+}
+
+interface SetupWithRollbackOptions extends RollbackFailedSetupOptions {
+  setupScript?: string;
+  shouldSkipSetup: boolean;
+}
+
+async function runSetupWithRollback(options: SetupWithRollbackOptions): Promise<void> {
+  try {
+    await runSetupScript(options.setupScript, options.context, options.shouldSkipSetup);
+  } catch (error) {
+    const rollbackErrors = await rollbackFailedSetup(options);
+    if (rollbackErrors.length > 0) {
+      throw new Error(formatSetupRollbackError(error, rollbackErrors));
+    }
+    throw error;
+  }
+}
+
+async function runSetupScript(
+  setupScript: string | undefined,
+  context: ScriptContext,
+  shouldSkipSetup: boolean,
+): Promise<void> {
+  if (shouldSkipSetup) {
+    if (setupScript) consola.info('Skipping setup script');
+    return;
+  }
+  if (!setupScript) return;
+
+  consola.info('Running setup script...');
+  await runScript(setupScript, context);
+}
+
+interface RollbackFailedSetupOptions {
+  cleanupScript?: string;
+  context: ScriptContext;
+  feature: string;
+  root: string;
+  treePath: string;
+  vcsDriver: VcsDriver;
+}
+
+async function rollbackFailedSetup(options: RollbackFailedSetupOptions): Promise<string[]> {
+  const errors: string[] = [];
+  consola.warn('Setup script failed; rolling back feature tree...');
+
+  await runRollbackCleanup(options.cleanupScript, options.context);
+  await collectRollbackError(errors, 'remove worktree', () =>
+    options.vcsDriver.removeFeature(options.root, options.treePath, options.feature)
+  );
+  await collectRollbackError(errors, 'remove leftover feature directory', () =>
+    removeFeatureTreeDirectory(options.treePath)
+  );
+  try {
+    deallocatePorts(options.root, options.feature);
+  } catch (error) {
+    errors.push(`deallocate ports: ${formatErrorMessage(error)}`);
+  }
+
+  return errors;
+}
+
+async function runRollbackCleanup(
+  cleanupScript: string | undefined,
+  context: ScriptContext,
+): Promise<void> {
+  if (!cleanupScript) return;
+
+  try {
+    consola.info('Running cleanup script before rollback...');
+    await runScript(cleanupScript, context);
+  } catch (error) {
+    consola.warn(`Cleanup script failed during rollback; continuing.\n${formatErrorMessage(error)}`);
+  }
+}
+
+async function collectRollbackError(
+  errors: string[],
+  label: string,
+  operation: () => Promise<unknown>,
+): Promise<void> {
+  try {
+    await operation();
+  } catch (error) {
+    errors.push(`${label}: ${formatErrorMessage(error)}`);
+  }
+}
+
+async function removeFeatureTreeDirectory(treePath: string): Promise<void> {
+  if (!existsSync(treePath)) return;
+
+  await rm(treePath, { force: true, recursive: true });
+}
+
+function formatSetupRollbackError(setupError: unknown, rollbackErrors: string[]): string {
+  return [
+    `Setup failed: ${formatErrorMessage(setupError)}`,
+    '',
+    'Rollback also failed:',
+    ...rollbackErrors.map((error) => `- ${error}`),
+  ].join('\n');
 }

@@ -24,7 +24,7 @@ A rail project is any git repo with a `.rail/config.yaml`. The full layout:
 
 - `.rail/config.yaml` — committed config (`RailConfig` in `src/types/config.ts`)
 - `.rail/local.yaml` — gitignored per-developer overrides; deep-merged onto `config.yaml` in `loadConfig()`
-- `.rail/port_allocations.json` — gitignored persistent map of `feature → { index }`
+- `.rail/feature_allocations.json` — gitignored persistent map of `feature → { index, setupSkipped? }`
 - `.rail/scripts/setup.sh`, `.rail/scripts/cleanup.sh` — boilerplate written by `rail init`
 - `~/.config/rail/config.yaml` — user-global hooks file, merged in by `loadAllHooks()`
 
@@ -36,7 +36,7 @@ Feature worktrees live at `<root>/<config.worktrees.dir>/<normalized-feature>` o
 
 ### Port allocation
 
-Slot-based, not per-port. `allocatePorts()` finds the lowest unused integer `index` and stores `{ feature: { index } }` in `port_allocations.json`. Actual ports are derived on demand: `getPortsForFeature(portConfig, index)` returns `[base + index*per_feature, ..., base + index*per_feature + per_feature - 1]`. Slots are bounded by `max / per_feature`. This means **port numbers are never persisted** — only the slot index — so changing `port.base` or `port.per_feature` shifts every existing feature's ports without touching the allocations file.
+Slot-based, not per-port. `allocatePorts()` finds the lowest unused integer `index` and stores `{ feature: { index } }` in `feature_allocations.json`. Actual ports are derived on demand: `getPortsForFeature(portConfig, index)` returns `[base + index*per_feature, ..., base + index*per_feature + per_feature - 1]`. Slots are bounded by `max / per_feature`. This means **port numbers are never persisted** — only the slot index — so changing `port.base` or `port.per_feature` shifts every existing feature's ports without touching the allocations file. `rail up --skip-setup` also records `setupSkipped: true` there so `rail down` skips cleanup for that tree.
 
 ### ScriptContext and RAIL_* env vars
 
@@ -46,7 +46,7 @@ Setup scripts, cleanup scripts, configured commands (`rail run`), and hooks all 
 
 Three overlapping mechanisms — keep them straight:
 
-- **`scripts.setup` / `scripts.cleanup`** — single shell scripts that run during `rail up` / `rail down`. Path is relative to `.rail/`. One per project.
+- **`scripts.setup` / `scripts.cleanup`** — single shell scripts that run during `rail up` / `rail down`. Path is relative to `.rail/`. One per project. Setup failure rolls back the feature tree and allocation before surfacing the setup error. Cleanup failures warn and do not block teardown.
 - **`hooks`** — list of `{ event: 'up'|'down'|'run', command }` that fire after the matching command completes. Loaded from `config.yaml`, `local.yaml`, and `~/.config/rail/config.yaml` and concatenated.
 - **`commands`** — user-defined entries invoked as `rail run <name>`. Each has a `scope` of `feature` (default; runs inside a worktree, requires feature context) or `project` (runs at repo root, no feature env vars). Anything after `--` is shell-escaped and appended to the command.
 

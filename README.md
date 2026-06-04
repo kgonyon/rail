@@ -38,6 +38,7 @@ bun run install:local   # builds dist/rail and symlinks it into ~/.bun/bin/rail
 cd your-project          # any git repo
 rail init                # writes .rail/config.yaml + setup/cleanup scripts
 rail up my-feature       # creates a worktree at trees/my-feature, allocates ports
+rail up my-feature --skip-setup # create without running setup script
 rail status              # lists active worktrees with branch, ports, dirty state, PR
 rail down my-feature     # removes the worktree and frees its port slot
 rail down --prune        # also deletes the feature branch/bookmark
@@ -64,7 +65,14 @@ omit `worktrees.branch_prefix` or set it to `""` to use feature names directly.
 Actual ports are derived as `base + index * per_feature`, so changing
 `port.base` or `port.per_feature` shifts every feature's ports without
 touching the allocations file. Only the slot index is persisted (in
-`.rail/port_allocations.json`, gitignored).
+`.rail/feature_allocations.json`, gitignored).
+
+**Setup and cleanup.** `rail up` runs the configured setup script after tree
+creation and env-file generation. If setup fails, rail rolls back the feature
+tree and feature allocation before surfacing the setup error. Use
+`rail up <feature> --skip-setup` to skip setup for that tree; rail records that
+choice and skips the cleanup script on `rail down`. Cleanup script failures are
+reported as warnings and do not block removing the feature tree.
 
 **Env files.** Templated from a source file you point at (e.g.
 `.env.example`). Keys listed under `replace:` get `${RAIL_PORT_N}`
@@ -154,7 +162,7 @@ The key blocks are:
 ## Commands
 
 - `rail init` — Initialize or repair a rail project with boilerplate config and scripts
-- `rail up <feature>` — Create a new feature tree with port allocation and env setup
+- `rail up <feature> [--skip-setup]` — Create a new feature tree with port allocation and optional env setup
 - `rail down [feature] [--prune]` — Remove a feature tree, deallocate ports, and optionally delete its branch/bookmark
 - `rail status` — Show all active feature trees with branch/bookmark, port, and dirty state
 - `rail run <name>` — Run a configured command

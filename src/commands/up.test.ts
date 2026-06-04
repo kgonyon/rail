@@ -80,6 +80,22 @@ describe('up and down command integration', () => {
     expect(existsSync(join(root, 'trees', 'demo'))).toBe(false);
     expect(existsSync(join(root, 'cleanup-ran'))).toBe(true);
     expect(readFeatureAllocations(root)).toEqual({ features: {} });
+    await expect(gitBranchExists(root, 'feature/demo')).resolves.toBe(false);
+  });
+
+  it('preserves a pre-existing feature branch when setup rollback runs', async () => {
+    const root = await makeGitRailProject({
+      setupScript: '#!/bin/sh\nexit 7\n',
+      cleanupScript: '#!/bin/sh\nexit 0\n',
+    });
+    await $`git -C ${root} branch feature/demo main`.quiet();
+
+    const result = await runRail(root, 'up', 'demo', '--no-refresh');
+
+    expect(result.exitCode).not.toBe(0);
+    expect(existsSync(join(root, 'trees', 'demo'))).toBe(false);
+    expect(readFeatureAllocations(root)).toEqual({ features: {} });
+    await expect(gitBranchExists(root, 'feature/demo')).resolves.toBe(true);
   });
 
   it('continues down when cleanup fails', async () => {
@@ -186,4 +202,13 @@ async function runRail(root: string, ...args: string[]): Promise<{
 
 function readFeatureAllocations(root: string): FeatureAllocations {
   return JSON.parse(readFileSync(join(root, '.rail', 'feature_allocations.json'), 'utf-8'));
+}
+
+async function gitBranchExists(root: string, branch: string): Promise<boolean> {
+  try {
+    await $`git -C ${root} rev-parse --verify refs/heads/${branch}`.quiet();
+    return true;
+  } catch {
+    return false;
+  }
 }

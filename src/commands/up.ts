@@ -14,6 +14,7 @@ import { runScript } from '../lib/script';
 import { formatErrorMessage } from '../lib/shell';
 import type { ScriptContext } from '../lib/script';
 import type { VcsDriver } from '../lib/vcs';
+import type { RailConfig } from '../types/config';
 
 export default defineCommand({
   meta: {
@@ -54,6 +55,9 @@ export default defineCommand({
 
     const parentRef = await vcsDriver.fetchParent(root, effectiveParent);
 
+    const branchPrefix = config.worktrees.branch_prefix ?? '';
+    const hadFeatureRef = await vcsDriver.featureRefExists(root, branchPrefix, feature);
+    assertCanCreateFeatureRef(config.vcs, feature, hadFeatureRef);
     const index = allocatePorts(root, feature, config.port);
     const ports = getPortsForFeature(config.port, index);
     const treePath = getWorktreePath(config.worktrees.dir, feature);
@@ -74,7 +78,7 @@ export default defineCommand({
     await vcsDriver.createFeature({
       root,
       path: treePath,
-      branchPrefix: config.worktrees.branch_prefix ?? '',
+      branchPrefix,
       feature,
       parentRef,
     });
@@ -90,18 +94,20 @@ export default defineCommand({
 
     await runSetupWithRollback({
       cleanupScript: config.scripts?.cleanup,
+      branchPrefix,
       context,
       feature,
       root,
       setupScript: config.scripts?.setup,
       shouldSkipSetup,
+      shouldPruneFeatureRef: !hadFeatureRef,
       treePath,
       vcsDriver,
     });
 
     await runHooks('up', context);
 
-    printSummary(feature, config.worktrees.branch_prefix ?? '', ports, treePath);
+    printSummary(feature, branchPrefix, ports, treePath);
   },
 });
 
@@ -133,6 +139,19 @@ export function shouldSkipSetupScript(
   rawArgs: string[],
 ): boolean {
   return args.skipSetup === true || args['skip-setup'] === true || rawArgs.includes('--skip-setup');
+}
+
+function assertCanCreateFeatureRef(
+  vcs: RailConfig['vcs'],
+  feature: string,
+  hadFeatureRef: boolean,
+): void {
+  if (vcs !== 'jj' || !hadFeatureRef) return;
+
+  throw new Error(
+    `JJ bookmark already exists for feature "${feature}". ` +
+      `If this is a stale failed setup bookmark, run \`rail down ${feature} --prune\` first.`,
+  );
 }
 
 async function refreshParentForUp(
@@ -185,10 +204,12 @@ async function runSetupScript(
 }
 
 interface RollbackFailedSetupOptions {
+  branchPrefix: string;
   cleanupScript?: string;
   context: ScriptContext;
   feature: string;
   root: string;
+  shouldPruneFeatureRef: boolean;
   treePath: string;
   vcsDriver: VcsDriver;
 }
@@ -204,6 +225,11 @@ async function rollbackFailedSetup(options: RollbackFailedSetupOptions): Promise
   await collectRollbackError(errors, 'remove leftover feature directory', () =>
     removeFeatureTreeDirectory(options.treePath)
   );
+  if (options.shouldPruneFeatureRef) {
+    await collectRollbackError(errors, 'prune feature ref', () =>
+      options.vcsDriver.pruneFeature(options.root, options.branchPrefix, options.feature)
+    );
+  }
   try {
     deallocatePorts(options.root, options.feature);
   } catch (error) {

@@ -7,6 +7,7 @@ import {
 } from './jj';
 
 const calls: Array<{ cwd: string; args: string }> = [];
+const existingBookmarks = new Set<string>();
 let failBookmarkCreate = false;
 let failWorkspaceForget = false;
 
@@ -22,10 +23,9 @@ const ops = createJjOperations({
     if (args.startsWith('workspace list --template ')) {
       return Promise.resolve('default\t/repo\tmain\ndemo\t/repo/.trees/demo\tfeature/demo\n');
     }
-    if (args === 'bookmark list feature/demo') {
-      return Promise.resolve('feature/demo: abc123\n');
-    }
     if (args.startsWith('bookmark list ')) {
+      const bookmark = args.slice('bookmark list '.length);
+      if (existingBookmarks.has(bookmark)) return Promise.resolve(`${bookmark}: abc123\n`);
       return Promise.resolve('');
     }
     if (args.startsWith('diff --from ')) {
@@ -40,6 +40,7 @@ const ops = createJjOperations({
 
 beforeEach(() => {
   calls.length = 0;
+  existingBookmarks.clear();
   failBookmarkCreate = false;
   failWorkspaceForget = false;
 });
@@ -51,6 +52,10 @@ describe('JJ operations', () => {
     expect(calls).toEqual([
       {
         cwd: '/repo',
+        args: 'bookmark list feature/demo',
+      },
+      {
+        cwd: '/repo',
         args: "workspace add --name demo --revision main@origin '/repo/.trees/demo'",
       },
       {
@@ -60,12 +65,33 @@ describe('JJ operations', () => {
     ]);
   });
 
-  it('sets the bookmark when creating it reports that it already exists', async () => {
-    failBookmarkCreate = true;
+  it('fails before adding a workspace when the bookmark already exists', async () => {
+    existingBookmarks.add('feature/demo');
 
-    await ops.addJjWorkspace('/repo', '/repo/.trees/demo', 'feature/', 'demo', 'main@origin');
+    await expect(
+      ops.addJjWorkspace('/repo', '/repo/.trees/demo', 'feature/', 'demo', 'main@origin'),
+    ).rejects.toThrow('JJ bookmark already exists: feature/demo');
 
     expect(calls).toEqual([
+      {
+        cwd: '/repo',
+        args: 'bookmark list feature/demo',
+      },
+    ]);
+  });
+
+  it('propagates bookmark create failures to leave cleanup decisions to callers', async () => {
+    failBookmarkCreate = true;
+
+    await expect(
+      ops.addJjWorkspace('/repo', '/repo/.trees/demo', 'feature/', 'demo', 'main@origin'),
+    ).rejects.toThrow('bookmark exists');
+
+    expect(calls).toEqual([
+      {
+        cwd: '/repo',
+        args: 'bookmark list feature/demo',
+      },
       {
         cwd: '/repo',
         args: "workspace add --name demo --revision main@origin '/repo/.trees/demo'",
@@ -73,10 +99,6 @@ describe('JJ operations', () => {
       {
         cwd: '/repo/.trees/demo',
         args: 'bookmark create feature/demo --revision @',
-      },
-      {
-        cwd: '/repo/.trees/demo',
-        args: 'bookmark set feature/demo --revision @',
       },
     ]);
   });
@@ -86,6 +108,10 @@ describe('JJ operations', () => {
     await ops.removeJjWorkspace('/repo', '/repo/.trees/feature+demo', 'feature/demo');
 
     expect(calls).toEqual([
+      {
+        cwd: '/repo',
+        args: 'bookmark list feature/demo',
+      },
       {
         cwd: '/repo',
         args: "workspace add --name feature+demo --revision main@origin '/repo/.trees/feature+demo'",
@@ -137,6 +163,8 @@ describe('JJ operations', () => {
   });
 
   it('checks whether a local JJ bookmark exists', async () => {
+    existingBookmarks.add('feature/demo');
+
     await expect(ops.jjBookmarkExists('/repo', 'feature/demo')).resolves.toBe(true);
     await expect(ops.jjBookmarkExists('/repo', 'missing')).resolves.toBe(false);
 

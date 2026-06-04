@@ -101,13 +101,15 @@ export function createJjOperations(deps: JjOperationsDependencies = { jjExec }) 
       validateJjRef(parent, 'parent ref');
       validateJjRef(bookmark, 'bookmark');
 
-      await deps.jjExec(root, `workspace add --name ${workspaceName} --revision ${parent} ${shellQuote(treePath)}`);
-
-      try {
-        await deps.jjExec(treePath, `bookmark create ${bookmark} --revision @`);
-      } catch {
-        await deps.jjExec(treePath, `bookmark set ${bookmark} --revision @`);
+      if (await hasJjBookmark(root, bookmark)) {
+        throw new Error(`JJ bookmark already exists: ${bookmark}`);
       }
+
+      await deps.jjExec(
+        root,
+        `workspace add --name ${workspaceName} --revision ${parent} ${shellQuote(treePath)}`,
+      );
+      await deps.jjExec(treePath, `bookmark create ${bookmark} --revision @`);
     },
 
     async removeJjWorkspace(root: string, _treePath: string, feature: string): Promise<void> {
@@ -123,8 +125,7 @@ export function createJjOperations(deps: JjOperationsDependencies = { jjExec }) 
 
     async jjBookmarkExists(root: string, bookmark: string): Promise<boolean> {
       validateJjRef(bookmark, 'bookmark');
-      const output = await deps.jjExec(root, `bookmark list ${bookmark}`);
-      return output.split('\n').some((line) => line.startsWith(`${bookmark}:`));
+      return hasJjBookmark(root, bookmark);
     },
 
     async listJjWorkspaces(root: string): Promise<WorktreeInfo[]> {
@@ -160,6 +161,11 @@ export function createJjOperations(deps: JjOperationsDependencies = { jjExec }) 
       }
     },
   };
+
+  async function hasJjBookmark(root: string, bookmark: string): Promise<boolean> {
+    const output = await deps.jjExec(root, `bookmark list ${bookmark}`);
+    return output.split('\n').some((line) => line.startsWith(`${bookmark}:`));
+  }
 }
 
 /** @internal */

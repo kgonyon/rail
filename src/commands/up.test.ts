@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileS
 import { rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { ensureWorktreesDir } from './up';
+import { ensureWorktreesDir, shouldSkipSetupScript } from './up';
 import type { FeatureAllocations } from '../types/config';
 
 const tempDirs: string[] = [];
@@ -43,7 +43,7 @@ describe('up command source', () => {
   it('supports skipping setup and rolling back failed setup', () => {
     const source = readFileSync(join(import.meta.dir, 'up.ts'), 'utf-8');
 
-    expect(source).toContain('skipSetup: {');
+    expect(source).toContain("'skip-setup': {");
     expect(source).toContain('setSetupSkipped(root, feature, shouldSkipSetup)');
     expect(source).toContain('rollbackFailedSetup');
   });
@@ -56,6 +56,13 @@ describe('up command source', () => {
 
     expect(existsSync(join(root, 'trees'))).toBe(true);
     expect(existsSync(treePath)).toBe(false);
+  });
+
+  it('detects the exact skip-setup flag', () => {
+    expect(shouldSkipSetupScript({}, ['demo', '--skip-setup'])).toBe(true);
+    expect(shouldSkipSetupScript({ 'skip-setup': true }, ['demo'])).toBe(true);
+    expect(shouldSkipSetupScript({ skipSetup: true }, ['demo'])).toBe(true);
+    expect(shouldSkipSetupScript({}, ['demo'])).toBe(false);
   });
 });
 

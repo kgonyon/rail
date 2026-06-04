@@ -34,12 +34,12 @@ export default defineCommand({
       type: 'boolean',
       description: 'Skip automatic parent refresh before creating the feature',
     },
-    skipSetup: {
+    'skip-setup': {
       type: 'boolean',
       description: 'Skip the configured setup script for this feature',
     },
   },
-  async run({ args }) {
+  async run({ args, rawArgs }) {
     const feature = args.feature;
     const root = await gitVcsDriver.resolveProjectRoot();
     const config = loadConfig(root);
@@ -47,7 +47,7 @@ export default defineCommand({
     validateFeatureName(feature);
 
     const effectiveParent = args.parent ?? config.default_parent;
-    const shouldSkipSetup = Boolean(args.skipSetup);
+    const shouldSkipSetup = shouldSkipSetupScript(args, rawArgs);
     if (config.auto_refresh && !args.noRefresh) {
       await refreshParentForUp(vcsDriver, root, effectiveParent, feature);
     }
@@ -125,6 +125,14 @@ function printSummary(
 /** @internal */
 export async function ensureWorktreesDir(treePath: string): Promise<void> {
   await mkdir(dirname(treePath), { recursive: true });
+}
+
+/** @internal */
+export function shouldSkipSetupScript(
+  args: { skipSetup?: boolean; 'skip-setup'?: boolean },
+  rawArgs: string[],
+): boolean {
+  return args.skipSetup === true || args['skip-setup'] === true || rawArgs.includes('--skip-setup');
 }
 
 async function refreshParentForUp(

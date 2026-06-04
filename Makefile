@@ -3,6 +3,9 @@
 install: check-bun deps
 	bun run install:local
 
+uninstall: 
+	bun run uninstall:local
+
 publish: check-bun deps typecheck test
 	@sh .ci/publish.sh
 

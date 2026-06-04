@@ -209,15 +209,41 @@ describe('JJ operations', () => {
       isDirty: true,
       localState: 'changed',
     });
-    expect(calls.at(-2)).toEqual({
+    expect(calls.at(-3)).toEqual({
+      cwd: '/repo/.trees/demo',
+      args: "diff --from 'latest(::@ & ::main@origin)' --to @ --stat",
+    });
+    expect(calls.at(-2)?.cwd).toBe('/repo/.trees/demo');
+    expect(calls.at(-2)?.args).toContain('ancestors(main@origin)');
+    expect(calls.at(-2)?.args).toContain('~ empty()');
+    expect(calls.at(-2)?.args).toContain('--count');
+    expect(calls.at(-1)).toEqual({
       cwd: '/repo/.trees/demo',
       args: "diff --from 'main@origin' --to @ --stat",
     });
-    expect(calls.at(-1)?.cwd).toBe('/repo/.trees/demo');
-    expect(calls.at(-1)?.args).toContain('ancestors(main@origin)');
-    expect(calls.at(-1)?.args).toContain('~ empty()');
-    expect(calls.at(-1)?.args).toContain('--count');
     expect(parseJjWorkspaceList('\n')).toEqual([]);
+  });
+
+  it('returns clean when all feature content is already in the parent (squash-merged)', async () => {
+    const mergedOps = createJjOperations({
+      jjExec(_cwd: string, args: string) {
+        if (args.startsWith('diff --from \'latest(')) {
+          return Promise.resolve('1 file changed, 3 insertions(+), 2 deletions(-)\n');
+        }
+        if (args.startsWith('diff --from \'main@origin\'')) {
+          return Promise.resolve('2 files changed, 0 insertions(+), 5 deletions(-)\n');
+        }
+        if (args.startsWith('log -r ')) {
+          return Promise.resolve('1\n');
+        }
+        return Promise.resolve('');
+      },
+    });
+    await expect(mergedOps.getJjWorkspaceStats('/repo/.trees/demo', 'main@origin')).resolves.toMatchObject({
+      isDirty: false,
+      localState: 'clean',
+      fileCount: 0,
+    });
   });
 
   it('parses JJ diff stat and revision count output', () => {

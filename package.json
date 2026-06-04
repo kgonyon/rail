@@ -9,7 +9,8 @@
     "build": "trap 'rm -f ./*.bun-build ./.?*.bun-build' EXIT; rm -f ./*.bun-build ./.?*.bun-build; RAIL_VERSION=$(bun -p \"require('./package.json').version\") bun build --compile --minify --env=RAIL_* src/cli.ts --outfile dist/rail",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "install:local": "bun run build && ln -sf $(pwd)/dist/rail ~/.bun/bin/rail"
+    "install:local": "bun run build && ln -sf $(pwd)/dist/rail ~/.bun/bin/rail",
+    "uninstall:local": "rm ~/.bun/bin/rail"
   },
   "dependencies": {
     "citty": "^0.2.0",

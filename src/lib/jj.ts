@@ -146,15 +146,27 @@ export function createJjOperations(deps: JjOperationsDependencies = { jjExec }) 
         const revisions = parseJjRevisionCount(revisionsOutput);
         const isDirty = diffStats.fileCount > 0 || revisions > 0;
 
+        if (!isDirty) {
+          return { ...CLEAN_STATS, localState: 'clean' };
+        }
+
+        // All content @ introduces may already be in parentRef (e.g. squash merge).
+        // If parent→@ has no insertions, @ has nothing parent doesn't → clean.
+        const parentDiffOutput = await deps.jjExec(path, buildParentDiffCommand(parentRef));
+        const parentDiffStats = parseJjDiffStatOutput(parentDiffOutput);
+        if (parentDiffStats.insertions === 0) {
+          return { ...CLEAN_STATS, localState: 'clean' };
+        }
+
         return {
           ...CLEAN_STATS,
           fileCount: diffStats.fileCount,
           stagedFiles: diffStats.fileCount,
           insertions: diffStats.insertions,
           deletions: diffStats.deletions,
-          isDirty,
+          isDirty: true,
           commitsAhead: revisions,
-          localState: isDirty ? 'changed' : 'clean',
+          localState: 'changed',
         };
       } catch {
         return { ...CLEAN_STATS, localState: 'unknown', openPrs: { state: 'unavailable' } };
@@ -270,6 +282,11 @@ function buildRevisionCountCommand(parentRef: string): string {
 }
 
 function buildDiffStatCommand(parentRef: string): string {
+  const mergeBase = `latest(::@ & ::${parentRef})`;
+  return `diff --from ${shellQuote(mergeBase)} --to @ --stat`;
+}
+
+function buildParentDiffCommand(parentRef: string): string {
   return `diff --from ${shellQuote(parentRef)} --to @ --stat`;
 }
 

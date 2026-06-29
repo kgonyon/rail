@@ -16,7 +16,13 @@ export default defineCommand({
     name: 'status',
     description: 'Show all active feature worktrees with branch, port, and dirty state',
   },
-  async run() {
+  args: {
+    parent: {
+      type: 'string',
+      description: 'Parent ref to compare feature changes against',
+    },
+  },
+  async run({ args }) {
     const root = await gitVcsDriver.resolveProjectRoot();
 
     if (!isRailProject(root)) {
@@ -37,9 +43,7 @@ export default defineCommand({
       return;
     }
 
-    const defaultBranch = config.vcs === 'jj'
-      ? config.default_parent
-      : await vcsDriver.getDefaultParent(root);
+    const defaultBranch = await resolveStatusParent(config, vcsDriver, root, args.parent);
     const forgeDriver = getForgeDriver(config.forge);
     const forgeAvailable = forgeDriver.isAvailable
       ? await forgeDriver.isAvailable()
@@ -66,6 +70,18 @@ export default defineCommand({
     });
   },
 });
+
+/** @internal */
+export async function resolveStatusParent(
+  config: RailConfig,
+  vcsDriver: VcsDriver,
+  root: string,
+  explicitParent?: string,
+): Promise<string> {
+  if (explicitParent) return explicitParent;
+  if (config.vcs === 'jj') return config.default_parent;
+  return `origin/${await vcsDriver.getDefaultParent(root)}`;
+}
 
 /** @internal */
 export function filterFeatureWorktrees(worktrees: VcsFeature[], treesDir: string): VcsFeature[] {

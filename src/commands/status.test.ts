@@ -11,6 +11,7 @@ import {
   getFeatureRefDisplay,
   getFeatureStatusBoxWidth,
   linkify,
+  resolveStatusParent,
   shouldEmitHyperlinks,
 } from './status';
 import type { WorktreeInfo, WorktreeStats } from '../lib/git';
@@ -64,6 +65,54 @@ describe('filterFeatureWorktrees', () => {
 
   it('handles empty worktree list', () => {
     expect(filterFeatureWorktrees([], '/projects/app/.trees')).toEqual([]);
+  });
+});
+
+describe('resolveStatusParent', () => {
+  function makeConfig(vcs: RailConfig['vcs'], defaultParent: string): RailConfig {
+    return {
+      name: 'app',
+      vcs,
+      forge: 'github',
+      default_parent: defaultParent,
+      auto_refresh: true,
+      setup: { track_rail: false, ignore_destination: 'gitignore' },
+      worktrees: { dir: '/repo/.trees', branch_prefix: '' },
+      port: { base: 3000, per_feature: 2, max: 100 },
+    };
+  }
+
+  it('uses an explicit parent exactly as provided', async () => {
+    const driver = {
+      getDefaultParent() {
+        throw new Error('default parent should not be resolved');
+      },
+    } as unknown as VcsDriver;
+
+    await expect(
+      resolveStatusParent(makeConfig('git', 'main'), driver, '/repo', 'origin/release'),
+    ).resolves.toBe('origin/release');
+  });
+
+  it('preserves the existing Git default comparison against origin/<default-branch>', async () => {
+    const driver = {
+      getDefaultParent(root: string) {
+        expect(root).toBe('/repo');
+        return Promise.resolve('main');
+      },
+    } as unknown as VcsDriver;
+
+    await expect(
+      resolveStatusParent(makeConfig('git', 'develop'), driver, '/repo'),
+    ).resolves.toBe('origin/main');
+  });
+
+  it('uses configured JJ default parent when no parent is provided', async () => {
+    const driver = {} as VcsDriver;
+
+    await expect(
+      resolveStatusParent(makeConfig('jj', 'main@origin'), driver, '/repo'),
+    ).resolves.toBe('main@origin');
   });
 });
 
@@ -540,7 +589,7 @@ describe('formatFeatureStatusMessage', () => {
 describe('collectStats', () => {
   it('hands the JJ bookmark name to the forge lookup', async () => {
     const reviewCalls: Array<{ path: string; head: string }> = [];
-    const statusCalls: Array<{ path: string; branch: string | undefined }> = [];
+    const statusCalls: Array<{ path: string; defaultBranch: string; branch: string | undefined }> = [];
     const stats: WorktreeStats = {
       fileCount: 0,
       stagedFiles: 0,
@@ -554,8 +603,8 @@ describe('collectStats', () => {
       localState: 'clean',
     };
     const driver = {
-      getLocalFeatureStatus(path: string, options: { branch?: string }) {
-        statusCalls.push({ path, branch: options.branch });
+      getLocalFeatureStatus(path: string, options: { defaultBranch: string; branch?: string }) {
+        statusCalls.push({ path, defaultBranch: options.defaultBranch, branch: options.branch });
         return Promise.resolve(stats);
       },
     } as VcsDriver;
@@ -581,7 +630,11 @@ describe('collectStats', () => {
       },
     });
 
-    expect(statusCalls).toEqual([{ path: '/repo/.trees/demo', branch: 'feature/demo' }]);
+    expect(statusCalls).toEqual([{
+      path: '/repo/.trees/demo',
+      defaultBranch: 'main@origin',
+      branch: 'feature/demo',
+    }]);
     expect(reviewCalls).toEqual([{ path: '/repo/.trees/demo', head: 'feature/demo' }]);
   });
 });

@@ -502,7 +502,7 @@ async function fetchCommitsAhead(
   try {
     const out = await gitExec(
       treePath,
-      `rev-list --count origin/${defaultBranch}..HEAD`,
+      `rev-list --count ${defaultBranch}..HEAD`,
     );
     return parseRevListCount(out);
   } catch {

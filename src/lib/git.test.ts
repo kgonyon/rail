@@ -935,6 +935,45 @@ describe('getWorktreeStats', () => {
     expect(stats.isDirty).toBe(false);
   });
 
+  it('uses the configured parent ref exactly for commitsAhead', async () => {
+    const calls: string[] = [];
+    gitExecHandler = (_root: string, args: string) => {
+      calls.push(args);
+      if (args.includes('rev-list')) return Promise.resolve('5\n');
+      if (args.includes('status --porcelain')) return Promise.resolve('');
+      return Promise.resolve('');
+    };
+
+    const stats = await getWorktreeStats('/fake/path', {
+      defaultBranch: 'origin/release',
+      branch: 'refs/heads/feature/x',
+    });
+
+    expect(stats.commitsAhead).toBe(5);
+    expect(calls).toContain('rev-list --count origin/release..HEAD');
+    expect(calls).not.toContain('rev-list --count origin/origin/release..HEAD');
+  });
+
+  it('does not run rev-list for unsafe parent refs', async () => {
+    let revListCalled = false;
+    gitExecHandler = (_root: string, args: string) => {
+      if (args.includes('rev-list')) {
+        revListCalled = true;
+        return Promise.resolve('99\n');
+      }
+      if (args.includes('status --porcelain')) return Promise.resolve('');
+      return Promise.resolve('');
+    };
+
+    const stats = await getWorktreeStats('/fake/path', {
+      defaultBranch: 'main;rm',
+      branch: 'refs/heads/feature/x',
+    });
+
+    expect(stats.commitsAhead).toBe(-1);
+    expect(revListCalled).toBe(false);
+  });
+
   it('sets commitsAhead to -1 when rev-list fails', async () => {
     gitExecHandler = (_root: string, args: string) => {
       if (args.includes('rev-list')) {

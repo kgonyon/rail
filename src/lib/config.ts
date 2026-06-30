@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from 'fs';
+import { basename } from 'path';
 import { parse } from 'yaml';
-import { getConfigPath, getLocalConfigPath, resolveWorktreesDir } from './paths';
+import { getConfigPath, getLocalConfigPath, getUserConfigPath, resolveWorktreesDir } from './paths';
 import type { RailConfig } from '../types/config';
 
 const CONFIG_REPAIR_MESSAGE = 'Run `rail init` to repair the project config.';
@@ -9,7 +10,15 @@ const FORGE_VALUES = ['github', 'gitlab', 'none'];
 const IGNORE_DESTINATION_VALUES = ['gitignore', 'exclude'];
 const FEATURE_NAME_PATTERN = /^[A-Za-z0-9._\-/]+$/;
 const PARENT_REF_PATTERN = /^[A-Za-z0-9._\-/@]+$/;
+const PROJECT_NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
 const REF_NAME_MAX_LENGTH = 255;
+
+export interface LoadConfigOptions {
+  parentRoot: string;
+  configRoot: string;
+  worktreesDir?: string;
+  userConfigPath?: string;
+}
 
 /** @internal */
 export function isPlainObject(value: unknown): value is Record<string, any> {
@@ -34,12 +43,34 @@ export function deepMerge(
   return result;
 }
 
-export function loadConfig(root: string): RailConfig {
-  const configPath = getConfigPath(root);
+export function loadConfig(rootOrOptions: string | LoadConfigOptions): RailConfig {
+  const options = typeof rootOrOptions === 'string'
+    ? { parentRoot: rootOrOptions, configRoot: rootOrOptions }
+    : rootOrOptions;
+  const configPath = getConfigPath(options.configRoot);
   const raw = readFileSync(configPath, 'utf-8');
-  let config = parseConfigYaml(raw, '.rail/config.yaml');
+  let config: unknown = {
+    name: basename(options.parentRoot),
+    worktrees: { dir: 'trees' },
+  };
 
-  const localPath = getLocalConfigPath(root);
+  const userPath = options.userConfigPath ?? getUserConfigPath();
+  if (existsSync(userPath)) {
+    const userRaw = readFileSync(userPath, 'utf-8');
+    const userConfig = parseConfigYaml(userRaw, '~/.config/rail/config.yaml');
+    if (isPlainObject(userConfig) && isPlainObject(config)) config = deepMerge(config, userConfig);
+  }
+
+  const projectConfig = parseConfigYaml(raw, '.rail/config.yaml');
+  if (!isPlainObject(config)) {
+    throw invalidConfig(['config must be a YAML object']);
+  }
+  if (!isPlainObject(projectConfig)) {
+    throw invalidConfig(['.rail/config.yaml must be a YAML object']);
+  }
+  config = deepMerge(config, projectConfig);
+
+  const localPath = getLocalConfigPath(options.configRoot);
   if (existsSync(localPath)) {
     const localRaw = readFileSync(localPath, 'utf-8');
     const localConfig = parseConfigYaml(localRaw, '.rail/local.yaml');
@@ -52,9 +83,21 @@ export function loadConfig(root: string): RailConfig {
     config = deepMerge(config, localConfig);
   }
 
+  if (options.worktreesDir) {
+    if (!isPlainObject(config)) {
+      throw invalidConfig(['config must be a YAML object']);
+    }
+    const worktrees = isPlainObject(config.worktrees) ? config.worktrees : {};
+    config = deepMerge(config, { worktrees: { ...worktrees, dir: options.worktreesDir } });
+  }
+
+  if (isPlainObject(config) && config.name == null) {
+    config.name = basename(options.parentRoot);
+  }
+
   validateConfig(config);
   config.worktrees.branch_prefix ??= '';
-  config.worktrees.dir = resolveWorktreesDir(root, config.worktrees.dir);
+  config.worktrees.dir = resolveWorktreesDir(options.parentRoot, config.worktrees.dir);
 
   return config;
 }
@@ -67,7 +110,10 @@ export function validateConfig(config: unknown): asserts config is RailConfig {
     throw invalidConfig(['config must be a YAML object']);
   }
 
-  requireNonEmptyString(config, 'name', errors);
+  const projectName = optionalNonEmptyString(config, 'name', errors);
+  if (projectName && !isSafeProjectName(projectName)) {
+    errors.push('name must contain only letters, digits, dot, underscore, or hyphen');
+  }
   requireEnum(config, 'vcs', VCS_VALUES, errors);
   requireEnum(config, 'forge', FORGE_VALUES, errors);
   requireBoolean(config, 'auto_refresh', errors);
@@ -84,6 +130,13 @@ export function validateConfig(config: unknown): asserts config is RailConfig {
   if (errors.length > 0) {
     throw invalidConfig(errors);
   }
+}
+
+/** @internal */
+export function isSafeProjectName(name: string): boolean {
+  if (!name || name.length > REF_NAME_MAX_LENGTH) return false;
+  if (!PROJECT_NAME_PATTERN.test(name)) return false;
+  return name !== '.' && name !== '..';
 }
 
 /** @internal */
@@ -116,7 +169,9 @@ function validateWorktrees(value: unknown, errors: string[]): void {
     return;
   }
 
-  requireNonEmptyString(value, 'worktrees.dir', errors, 'dir');
+  if (value.dir !== undefined && value.dir !== null) {
+    requireNonEmptyString(value, 'worktrees.dir', errors, 'dir');
+  }
   const branchPrefix = optionalString(value, 'worktrees.branch_prefix', errors, 'branch_prefix');
   if (branchPrefix && !isSafeParentRefName(branchPrefix)) {
     errors.push('worktrees.branch_prefix must contain only letters, digits, dot, underscore, hyphen, slash, or @');
@@ -133,6 +188,25 @@ function optionalString(
   if (value === undefined) return undefined;
   if (typeof value !== 'string') {
     errors.push(`${label} must be a string`);
+    return undefined;
+  }
+  return value;
+}
+
+function optionalNonEmptyString(
+  object: Record<string, any>,
+  label: string,
+  errors: string[],
+  key = label,
+): string | undefined {
+  const value = object[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') {
+    errors.push(`${label} must be a string`);
+    return undefined;
+  }
+  if (value.trim() === '') {
+    errors.push(`${label} must not be empty`);
     return undefined;
   }
   return value;

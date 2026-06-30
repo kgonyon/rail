@@ -2,10 +2,10 @@ import { existsSync } from 'fs';
 import { rm } from 'fs/promises';
 import { defineCommand } from 'citty';
 import consola from 'consola';
-import { formatPathForDisplay, getWorktreePath } from '../lib/paths';
+import { formatPathForDisplay, getFeatureTreePath, resolveRailRuntime } from '../lib/paths';
 import { loadConfig } from '../lib/config';
-import { loadFeatureAllocations, getPortsForFeature, deallocatePorts } from '../lib/ports';
-import { getVcsDriver, gitVcsDriver } from '../lib/vcs';
+import { loadFeatureAllocations, getPortsForFeature, deallocatePorts, setAllocatedFeaturePath } from '../lib/ports';
+import { getVcsDriver } from '../lib/vcs';
 import { resolveFeature } from '../lib/detect';
 import { runHooks } from '../lib/hooks';
 import { runScript } from '../lib/script';
@@ -32,17 +32,38 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    const root = await gitVcsDriver.resolveProjectRoot();
-    const config = loadConfig(root);
+    const runtime = await resolveRailRuntime();
+    const root = runtime.parentRoot;
+    const config = loadConfig({ parentRoot: runtime.parentRoot, configRoot: runtime.configRoot });
     const vcsDriver = getVcsDriver(config.vcs);
+    const allocations = loadFeatureAllocations(runtime.allocationsRoot);
 
-    const feature = resolveFeature(args.feature as string | undefined, config.worktrees.dir);
-    const treePath = getWorktreePath(config.worktrees.dir, feature);
-    const target = await getDownTarget({ root, config, vcsDriver, feature, treePath });
+    const feature = resolveFeature(args.feature as string | undefined, {
+      allocations,
+      treesDir: config.worktrees.dir,
+    });
+    const treePath = await resolveTreePath({
+      allocationsRoot: runtime.allocationsRoot,
+      config,
+      feature,
+      root,
+      vcsDriver,
+    });
+    const target = await getDownTarget({
+      allocationsRoot: runtime.allocationsRoot,
+      root,
+      config,
+      vcsDriver,
+      feature,
+      treePath,
+    });
     validateDownTarget(target, Boolean(args.prune));
 
     const context: ScriptContext = {
       root,
+      workspaceRoot: runtime.workspaceRoot,
+      railDir: runtime.railDir,
+      parentRailDir: runtime.parentRailDir,
       feature,
       featureDir: treePath,
       projectName: config.name,
@@ -67,7 +88,7 @@ export default defineCommand({
     }
 
     if (target.hasFeatureAllocation) {
-      deallocatePorts(root, feature);
+      deallocatePorts(runtime.allocationsRoot, feature);
       consola.info('Deallocated ports');
     }
 
@@ -85,11 +106,36 @@ export default defineCommand({
 });
 
 interface DownTargetOptions {
+  allocationsRoot: string;
   root: string;
   config: RailConfig;
   vcsDriver: VcsDriver;
   feature: string;
   treePath: string;
+}
+
+async function resolveTreePath(options: {
+  allocationsRoot: string;
+  config: RailConfig;
+  feature: string;
+  root: string;
+  vcsDriver: VcsDriver;
+}): Promise<string> {
+  const allocation = loadFeatureAllocations(options.allocationsRoot).features[options.feature];
+  if (allocation?.path) return allocation.path;
+
+  const branch = `${options.config.worktrees.branch_prefix ?? ''}${options.feature}`;
+  const worktree = (await options.vcsDriver.listFeatures(options.root)).find((candidate) => {
+    const candidateBranch = candidate.branch.replace(/^refs\/heads\//, '');
+    return candidateBranch === branch || candidate.feature === options.feature;
+  });
+
+  if (worktree?.path) {
+    setAllocatedFeaturePath(options.allocationsRoot, options.feature, worktree.path);
+    return worktree.path;
+  }
+
+  return getFeatureTreePath(options.config.worktrees.dir, options.config.name, options.feature);
 }
 
 interface DownTarget {
@@ -105,7 +151,7 @@ interface DownTarget {
 
 async function getDownTarget(options: DownTargetOptions): Promise<DownTarget> {
   const branchPrefix = options.config.worktrees.branch_prefix ?? '';
-  const featureAllocation = lookupFeatureAllocation(options.root, options.feature, options.config);
+  const featureAllocation = lookupFeatureAllocation(options.allocationsRoot, options.feature, options.config);
   const hasFeatureRef = await options.vcsDriver.featureRefExists(
     options.root,
     branchPrefix,

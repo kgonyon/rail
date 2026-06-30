@@ -1,5 +1,5 @@
 import { $ } from 'bun';
-import { dirname, isAbsolute, join } from 'path';
+import { basename, dirname, isAbsolute, join } from 'path';
 import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { formatErrorMessage } from './shell';
@@ -7,6 +7,10 @@ import { formatErrorMessage } from './shell';
 const FEATURE_DIR_SEPARATOR = '+';
 
 export async function getGitRoot(): Promise<string> {
+  return getParentRoot();
+}
+
+export async function getParentRoot(): Promise<string> {
   const errors: string[] = [];
 
   try {
@@ -40,17 +44,78 @@ export async function getGitRoot(): Promise<string> {
   );
 }
 
+export async function getWorkspaceRoot(): Promise<string> {
+  const errors: string[] = [];
+
+  try {
+    const result = await $`git rev-parse --show-toplevel`.quiet();
+    return result.text().trim();
+  } catch (err) {
+    errors.push(formatRootError('git top-level', err));
+  }
+
+  try {
+    const result = await $`jj root`.quiet();
+    return result.text().trim();
+  } catch (err) {
+    errors.push(formatRootError('jj root', err));
+  }
+
+  throw new Error(
+    'Not inside a git or jj repository. Run this command from within a project.' +
+      `\n\n${errors.join('\n\n')}`,
+  );
+}
+
+export interface RailRuntime {
+  workspaceRoot: string;
+  parentRoot: string;
+  configRoot: string;
+  railDir: string;
+  parentRailDir: string;
+  allocationsRoot: string;
+}
+
+export async function resolveRailRuntime(): Promise<RailRuntime> {
+  const workspaceRoot = await getWorkspaceRoot();
+  const parentRoot = await getParentRoot();
+  const workspaceConfig = getConfigPath(workspaceRoot);
+  const parentConfig = getConfigPath(parentRoot);
+
+  let configRoot: string | null = null;
+  if (existsSync(workspaceConfig)) {
+    configRoot = workspaceRoot;
+  } else if (existsSync(parentConfig)) {
+    configRoot = parentRoot;
+  }
+
+  if (!configRoot) {
+    throw new Error(
+      `No .rail/config.yaml found at ${workspaceRoot} or ${parentRoot}. Initialize with a config file at .rail/config.yaml`,
+    );
+  }
+
+  return {
+    workspaceRoot,
+    parentRoot,
+    configRoot,
+    railDir: join(configRoot, '.rail'),
+    parentRailDir: join(parentRoot, '.rail'),
+    allocationsRoot: parentRoot,
+  };
+}
+
 function formatRootError(label: string, err: unknown): string {
   return `${label} failed:\n${formatErrorMessage(err)}`;
 }
 
 export async function getProjectRoot(): Promise<string> {
-  const gitRoot = await getGitRoot();
-  const projectRoot = findRailProjectRoot(gitRoot);
+  const runtime = await resolveRailRuntime();
+  const projectRoot = findRailProjectRoot(runtime.configRoot);
 
   if (!projectRoot) {
     throw new Error(
-      `No .rail/config.yaml found at ${gitRoot}. Initialize with a config file at .rail/config.yaml`,
+      `No .rail/config.yaml found at ${runtime.configRoot}. Initialize with a config file at .rail/config.yaml`,
     );
   }
 
@@ -70,6 +135,14 @@ export function findRailProjectRoot(start: string): string | null {
 
 export function getWorktreePath(dir: string, feature: string): string {
   return join(dir, getFeatureDirName(feature));
+}
+
+export function getFeatureTreePath(dir: string, projectName: string, feature: string): string {
+  return join(dir, projectName, getFeatureDirName(feature));
+}
+
+export function getDefaultProjectName(parentRoot: string): string {
+  return basename(parentRoot);
 }
 
 export function getFeatureDirName(feature: string): string {
@@ -142,4 +215,17 @@ export function resolveRelativePath(command: string, baseDir: string): string {
     return join(baseDir, command);
   }
   return command;
+}
+
+export function resolveRelativePathWithFallback(
+  command: string,
+  baseDir: string,
+  fallbackBaseDir?: string,
+): string {
+  if (!isRelativePath(command)) return command;
+
+  const resolved = join(baseDir, command);
+  if (existsSync(resolved) || !fallbackBaseDir || fallbackBaseDir === baseDir) return resolved;
+
+  return join(fallbackBaseDir, command);
 }

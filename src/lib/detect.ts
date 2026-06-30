@@ -1,5 +1,6 @@
 import { validateFeatureName } from './config';
 import { getFeatureNameFromDirName } from './paths';
+import type { FeatureAllocations } from '../types/config';
 
 export function detectFeatureFromCwd(cwd: string, treesDir: string): string | null {
   const normalized = cwd.replace(/\\/g, '/');
@@ -15,26 +16,54 @@ export function detectFeatureFromCwd(cwd: string, treesDir: string): string | nu
   return feature || null;
 }
 
+export interface ResolveFeatureOptions {
+  treesDir?: string;
+  allocations?: FeatureAllocations;
+  commandName?: string;
+}
+
+export function detectFeatureFromAllocations(cwd: string, allocations: FeatureAllocations): string | null {
+  const normalized = cwd.replace(/\\/g, '/');
+
+  for (const [feature, allocation] of Object.entries(allocations.features)) {
+    if (!allocation.path) continue;
+
+    const dir = allocation.path.replace(/\\/g, '/').replace(/\/$/, '');
+    if (normalized === dir || normalized.startsWith(`${dir}/`)) return feature;
+  }
+
+  return null;
+}
+
 export function resolveFeature(
   feature: string | undefined,
-  treesDir: string,
+  treesDirOrOptions: string | ResolveFeatureOptions,
   commandName?: string,
 ): string {
+  const options = typeof treesDirOrOptions === 'string'
+    ? { treesDir: treesDirOrOptions, commandName }
+    : treesDirOrOptions;
   if (feature) {
     validateFeatureName(feature);
     return feature;
   }
 
-  const detected = detectFeatureFromCwd(process.cwd(), treesDir);
-  if (!detected) {
-    if (commandName) {
+  const detected = options.allocations
+    ? detectFeatureFromAllocations(process.cwd(), options.allocations)
+    : null;
+  const fallbackDetected = !detected && options.treesDir
+    ? detectFeatureFromCwd(process.cwd(), options.treesDir)
+    : null;
+  const resolved = detected ?? fallbackDetected;
+  if (!resolved) {
+    if (options.commandName) {
       throw new Error(
-        `Command "${commandName}" requires a feature context. Run from inside a feature tree or pass -f <feature>.`,
+        `Command "${options.commandName}" requires a feature context. Run from inside a feature tree or pass -f <feature>.`,
       );
     }
     throw new Error('Could not detect feature name. Provide it as an argument.');
   }
 
-  validateFeatureName(detected);
-  return detected;
+  validateFeatureName(resolved);
+  return resolved;
 }

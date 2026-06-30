@@ -2,11 +2,11 @@ import { defineCommand } from 'citty';
 import consola from 'consola';
 import { basename } from 'path';
 import { isatty } from 'tty';
-import { formatPathForDisplay, getFeatureNameFromDirName, isRailProject } from '../lib/paths';
+import { formatPathForDisplay, getFeatureNameFromDirName, resolveRailRuntime } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { loadFeatureAllocations, getPortsForFeature } from '../lib/ports';
 import { getForgeDriver } from '../lib/forge';
-import { getVcsDriver, gitVcsDriver } from '../lib/vcs';
+import { getVcsDriver } from '../lib/vcs';
 import type { VcsDriver, VcsFeature, VcsFeatureStatus } from '../lib/vcs';
 import type { ForgeDriver, OpenReviewsResult } from '../lib/forge';
 import type { FeatureAllocations, RailConfig } from '../types/config';
@@ -23,20 +23,14 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    const root = await gitVcsDriver.resolveProjectRoot();
-
-    if (!isRailProject(root)) {
-      consola.warn('Not a rail project. Run `rail init` to initialize.');
-      return;
-    }
-
-    const config = loadConfig(root);
+    const runtime = await resolveRailRuntime();
+    const root = runtime.parentRoot;
+    const config = loadConfig({ parentRoot: runtime.parentRoot, configRoot: runtime.configRoot });
     const vcsDriver = getVcsDriver(config.vcs);
-    const allocations = loadFeatureAllocations(root);
+    const allocations = loadFeatureAllocations(runtime.allocationsRoot);
     const worktrees = await vcsDriver.listFeatures(root);
-    const treesDir = config.worktrees.dir.replace(/\/$/, '');
 
-    const features = filterFeatureWorktrees(worktrees, treesDir);
+    const features = filterFeatureWorktrees(worktrees, allocations, config, root);
 
     if (features.length === 0) {
       consola.info('No active feature worktrees');
@@ -84,9 +78,52 @@ export async function resolveStatusParent(
 }
 
 /** @internal */
-export function filterFeatureWorktrees(worktrees: VcsFeature[], treesDir: string): VcsFeature[] {
-  const prefix = `${treesDir.replace(/\/$/, '')}/`;
-  return worktrees.filter((wt) => wt.path.startsWith(prefix));
+export function filterFeatureWorktrees(
+  worktrees: VcsFeature[],
+  allocationsOrTreesDir: FeatureAllocations | string,
+  config?: RailConfig,
+  parentRoot?: string,
+): VcsFeature[] {
+  if (typeof allocationsOrTreesDir === 'string') {
+    const prefix = `${allocationsOrTreesDir.replace(/\/$/, '')}/`;
+    return worktrees.filter((wt) => wt.path.startsWith(prefix));
+  }
+
+  const allocations = allocationsOrTreesDir;
+  const allocatedPaths = new Map<string, string>();
+  for (const [feature, allocation] of Object.entries(allocations.features)) {
+    if (allocation.path) allocatedPaths.set(normalizePath(allocation.path), feature);
+  }
+
+  return worktrees.flatMap((wt) => {
+    if (parentRoot && normalizePath(wt.path) === normalizePath(parentRoot)) return [];
+
+    const feature = getFeatureForWorktree(wt, allocations, allocatedPaths, config);
+    return feature ? [{ ...wt, feature }] : [];
+  });
+}
+
+function getFeatureForWorktree(
+  wt: VcsFeature,
+  allocations: FeatureAllocations,
+  allocatedPaths: Map<string, string>,
+  config?: RailConfig,
+): string | null {
+  const allocatedFeature = allocatedPaths.get(normalizePath(wt.path));
+  if (allocatedFeature) return allocatedFeature;
+
+  const branch = wt.branch.replace(/^refs\/heads\//, '');
+  const branchPrefix = config?.worktrees.branch_prefix ?? '';
+  for (const feature of Object.keys(allocations.features)) {
+    if (`${branchPrefix}${feature}` === branch) return feature;
+  }
+
+  if (wt.feature && allocations.features[wt.feature]) return wt.feature;
+  return null;
+}
+
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/$/, '');
 }
 
 /**

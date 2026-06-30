@@ -3,11 +3,11 @@ import consola from 'consola';
 import { existsSync } from 'fs';
 import { mkdir, rm } from 'fs/promises';
 import { dirname } from 'path';
-import { formatPathForDisplay, getWorktreePath } from '../lib/paths';
+import { formatPathForDisplay, getFeatureTreePath, resolveRailRuntime } from '../lib/paths';
 import { loadConfig } from '../lib/config';
 import { validateFeatureName } from '../lib/config';
-import { allocatePorts, deallocatePorts, getPortsForFeature, setSetupSkipped } from '../lib/ports';
-import { getVcsDriver, gitVcsDriver } from '../lib/vcs';
+import { allocatePorts, deallocatePorts, getPortsForFeature, loadFeatureAllocations, setSetupSkipped } from '../lib/ports';
+import { getVcsDriver } from '../lib/vcs';
 import { generateEnvFiles } from '../lib/env';
 import { runHooks } from '../lib/hooks';
 import { runScript } from '../lib/script';
@@ -39,11 +39,20 @@ export default defineCommand({
       type: 'boolean',
       description: 'Skip the configured setup script for this feature',
     },
+    worktreesDir: {
+      type: 'string',
+      description: 'Directory where this feature tree is created',
+    },
   },
   async run({ args, rawArgs }) {
     const feature = args.feature;
-    const root = await gitVcsDriver.resolveProjectRoot();
-    const config = loadConfig(root);
+    const runtime = await resolveRailRuntime();
+    const root = runtime.parentRoot;
+    const config = loadConfig({
+      parentRoot: runtime.parentRoot,
+      configRoot: runtime.configRoot,
+      worktreesDir: args.worktreesDir as string | undefined,
+    });
     const vcsDriver = getVcsDriver(config.vcs);
     validateFeatureName(feature);
 
@@ -58,12 +67,17 @@ export default defineCommand({
     const branchPrefix = config.worktrees.branch_prefix ?? '';
     const hadFeatureRef = await vcsDriver.featureRefExists(root, branchPrefix, feature);
     assertCanCreateFeatureRef(config.vcs, feature, hadFeatureRef);
-    const index = allocatePorts(root, feature, config.port);
+    const plannedTreePath = getFeatureTreePath(config.worktrees.dir, config.name, feature);
+    const existingAllocation = loadFeatureAllocations(runtime.allocationsRoot).features[feature];
+    const treePath = existingAllocation?.path ?? plannedTreePath;
+    const index = allocatePorts(runtime.allocationsRoot, feature, config.port, treePath);
     const ports = getPortsForFeature(config.port, index);
-    const treePath = getWorktreePath(config.worktrees.dir, feature);
 
     const context: ScriptContext = {
       root,
+      workspaceRoot: runtime.workspaceRoot,
+      railDir: runtime.railDir,
+      parentRailDir: runtime.parentRailDir,
       feature,
       featureDir: treePath,
       projectName: config.name,
@@ -82,7 +96,7 @@ export default defineCommand({
       feature,
       parentRef,
     });
-    setSetupSkipped(root, feature, shouldSkipSetup);
+    setSetupSkipped(runtime.allocationsRoot, feature, shouldSkipSetup);
     consola.info(`Created worktree at ${formatPathForDisplay(treePath)}`);
 
     consola.info(`Allocated ports: ${ports.join(', ')}`);
@@ -98,6 +112,7 @@ export default defineCommand({
       context,
       feature,
       root,
+      allocationsRoot: runtime.allocationsRoot,
       setupScript: config.scripts?.setup,
       shouldSkipSetup,
       shouldPruneFeatureRef: !hadFeatureRef,
@@ -204,6 +219,7 @@ async function runSetupScript(
 }
 
 interface RollbackFailedSetupOptions {
+  allocationsRoot: string;
   branchPrefix: string;
   cleanupScript?: string;
   context: ScriptContext;
@@ -231,7 +247,7 @@ async function rollbackFailedSetup(options: RollbackFailedSetupOptions): Promise
     );
   }
   try {
-    deallocatePorts(options.root, options.feature);
+    deallocatePorts(options.allocationsRoot, options.feature);
   } catch (error) {
     errors.push(`deallocate ports: ${formatErrorMessage(error)}`);
   }

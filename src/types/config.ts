@@ -53,6 +53,7 @@ export interface RailConfig {
 
 export interface FeatureAllocation {
   index: number;
+  path?: string;
   setupSkipped?: boolean;
 }
 

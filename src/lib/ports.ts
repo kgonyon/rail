@@ -28,10 +28,14 @@ export function saveFeatureAllocations(root: string, allocations: FeatureAllocat
   removeLegacyFeatureAllocations(root);
 }
 
-export function allocatePorts(root: string, feature: string, portConfig: PortConfig): number {
+export function allocatePorts(root: string, feature: string, portConfig: PortConfig, path?: string): number {
   const allocations = loadFeatureAllocations(root);
 
   if (allocations.features[feature]) {
+    if (path && !allocations.features[feature].path) {
+      allocations.features[feature].path = path;
+      saveFeatureAllocations(root, allocations);
+    }
     return allocations.features[feature].index;
   }
 
@@ -50,10 +54,24 @@ export function allocatePorts(root: string, feature: string, portConfig: PortCon
     throw new Error(`No available port slots (max ${maxSlots} features)`);
   }
 
-  allocations.features[feature] = { index };
+  allocations.features[feature] = path ? { index, path } : { index };
   saveFeatureAllocations(root, allocations);
 
   return index;
+}
+
+export function getAllocatedFeaturePath(root: string, feature: string): string | undefined {
+  return loadFeatureAllocations(root).features[feature]?.path;
+}
+
+export function setAllocatedFeaturePath(root: string, feature: string, path: string): void {
+  const allocations = loadFeatureAllocations(root);
+  const allocation = allocations.features[feature];
+
+  if (!allocation || allocation.path === path) return;
+
+  allocations.features[feature] = { ...allocation, path };
+  saveFeatureAllocations(root, allocations);
 }
 
 export function setSetupSkipped(root: string, feature: string, setupSkipped: boolean): void {

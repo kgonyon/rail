@@ -66,6 +66,41 @@ describe('filterFeatureWorktrees', () => {
   it('handles empty worktree list', () => {
     expect(filterFeatureWorktrees([], '/projects/app/.trees')).toEqual([]);
   });
+
+  it('matches worktrees by persisted allocation path instead of current trees dir', () => {
+    const result = filterFeatureWorktrees(
+      [
+        { path: '/projects/app', head: 'abc', branch: 'refs/heads/main' },
+        { path: '/shared/trees/app/feat-a', head: 'def', branch: 'refs/heads/feature/feat-a' },
+        { path: '/old/trees/app/feat-b', head: 'ghi', branch: 'refs/heads/feature/feat-b' },
+      ],
+      {
+        features: {
+          'feat-b': { index: 0, path: '/old/trees/app/feat-b' },
+        },
+      },
+      {
+        name: 'app',
+        vcs: 'git',
+        forge: 'github',
+        default_parent: 'main',
+        auto_refresh: true,
+        setup: { track_rail: false, ignore_destination: 'gitignore' },
+        worktrees: { dir: '/shared/trees', branch_prefix: 'feature/' },
+        port: { base: 3000, per_feature: 2, max: 100 },
+      },
+      '/projects/app',
+    );
+
+    expect(result).toEqual([
+      {
+        path: '/old/trees/app/feat-b',
+        head: 'ghi',
+        branch: 'refs/heads/feature/feat-b',
+        feature: 'feat-b',
+      },
+    ]);
+  });
 });
 
 describe('resolveStatusParent', () => {

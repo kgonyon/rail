@@ -4,7 +4,7 @@ import { basename, isAbsolute, relative, sep, join } from 'path';
 import { existsSync } from 'fs';
 import { mkdir, writeFile, readFile, chmod } from 'fs/promises';
 import { parse, stringify } from 'yaml';
-import { isPlainObject, isSafeParentRefName, validateConfig } from '../lib/config';
+import { deepMerge, isPlainObject, isSafeParentRefName, validateConfig } from '../lib/config';
 import { getGitRoot, resolveWorktreesDir } from '../lib/paths';
 import type { RailConfig } from '../types/config';
 
@@ -144,10 +144,11 @@ async function createConfigFile(root: string, projectName: string, options: Init
 
   const existing = await readExistingConfig(configPath);
   const repaired = repairConfig(existing, projectName, options);
+  const effective = deepMerge({ name: projectName, worktrees: { dir: options.worktreesDir } }, repaired) as RailConfig;
 
-  validateConfig(repaired);
+  validateConfig(effective);
   await writeFile(configPath, stringify(repaired));
-  return initOptionsFromConfig(repaired);
+  return initOptionsFromConfig(effective);
 }
 
 function initOptionsFromConfig(config: RailConfig): InitOptions {
@@ -178,7 +179,11 @@ function repairConfig(
 ): Record<string, any> {
   const repaired = { ...existing };
 
-  repaired.name = nonEmptyString(existing.name) ? existing.name : projectName;
+  if (nonEmptyString(existing.name)) {
+    repaired.name = existing.name;
+  } else {
+    delete repaired.name;
+  }
   repaired.vcs = enumValue(existing.vcs, ['git', 'jj']) ?? options.vcs;
   repaired.forge = enumValue(existing.forge, ['github', 'gitlab', 'none']) ?? options.forge;
   repaired.default_parent = safeParent(existing.default_parent) ? existing.default_parent : options.defaultParent;
@@ -194,8 +199,14 @@ function repairConfig(
   const existingWorktrees = isPlainObject(existing.worktrees) ? existing.worktrees : {};
   repaired.worktrees = {
     ...existingWorktrees,
-    dir: nonEmptyString(existingWorktrees.dir) ? existingWorktrees.dir : options.worktreesDir,
   };
+  if (nonEmptyString(existingWorktrees.dir)) {
+    repaired.worktrees.dir = existingWorktrees.dir;
+  } else if (options.worktreesDir !== 'trees') {
+    repaired.worktrees.dir = options.worktreesDir;
+  } else {
+    delete repaired.worktrees.dir;
+  }
   if ('branch_prefix' in existingWorktrees) {
     repaired.worktrees.branch_prefix = safeParent(existingWorktrees.branch_prefix)
       ? existingWorktrees.branch_prefix
@@ -234,10 +245,15 @@ export function buildConfigContent(
   projectName: string,
   options: InitOptions = defaultInitOptions(),
 ): string {
+  const worktreesDirEntry = options.worktreesDir !== 'trees'
+    ? `  dir: ${options.worktreesDir}\n`
+    : '';
+
   return `# rail project configuration
 # Docs: https://github.com/kgonyon/rail
 
-name: ${projectName}
+# Uncomment to override the project namespace used under worktrees.dir.
+# name: ${projectName}
 
 vcs: ${options.vcs}
 forge: ${options.forge}
@@ -250,11 +266,13 @@ setup:
 
 worktrees:
   # Directory where feature worktrees are created.
+  # Defaults to "trees" relative to the project root, and can be set globally
+  # in ~/.config/rail/config.yaml. Feature trees are created under
+  # <dir>/<project>/<feature>.
   # Relative paths resolve against the project root. Absolute paths
   # and ~/... are also supported (useful in .rail/local.yaml to keep
   # worktrees outside the repo).
-  dir: ${options.worktreesDir}
-  # Optional prefix for feature branches/bookmarks (e.g., feature/my-feature).
+${worktreesDirEntry}  # Optional prefix for feature branches/bookmarks (e.g., feature/my-feature).
   # Omit this key or set it to "" to use the feature name directly.
   branch_prefix: feature/
 

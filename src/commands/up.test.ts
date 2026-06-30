@@ -1,6 +1,6 @@
 import { afterEach, describe, it, expect } from 'bun:test';
 import { $ } from 'bun';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'fs';
 import { rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -44,7 +44,7 @@ describe('up command source', () => {
     const source = readFileSync(join(import.meta.dir, 'up.ts'), 'utf-8');
 
     expect(source).toContain("'skip-setup': {");
-    expect(source).toContain('setSetupSkipped(root, feature, shouldSkipSetup)');
+    expect(source).toContain('setSetupSkipped(runtime.allocationsRoot, feature, shouldSkipSetup)');
     expect(source).toContain('rollbackFailedSetup');
   });
 
@@ -77,7 +77,7 @@ describe('up and down command integration', () => {
 
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain('Script failed: scripts/setup.sh');
-    expect(existsSync(join(root, 'trees', 'demo'))).toBe(false);
+    expect(existsSync(join(root, 'trees', 'test-project', 'demo'))).toBe(false);
     expect(existsSync(join(root, 'cleanup-ran'))).toBe(true);
     expect(readFeatureAllocations(root)).toEqual({ features: {} });
     await expect(gitBranchExists(root, 'feature/demo')).resolves.toBe(false);
@@ -93,7 +93,7 @@ describe('up and down command integration', () => {
     const result = await runRail(root, 'up', 'demo', '--no-refresh');
 
     expect(result.exitCode).not.toBe(0);
-    expect(existsSync(join(root, 'trees', 'demo'))).toBe(false);
+    expect(existsSync(join(root, 'trees', 'test-project', 'demo'))).toBe(false);
     expect(readFeatureAllocations(root)).toEqual({ features: {} });
     await expect(gitBranchExists(root, 'feature/demo')).resolves.toBe(true);
   });
@@ -109,7 +109,7 @@ describe('up and down command integration', () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toContain('Cleanup script failed; continuing teardown.');
-    expect(existsSync(join(root, 'trees', 'demo'))).toBe(false);
+    expect(existsSync(join(root, 'trees', 'test-project', 'demo'))).toBe(false);
     expect(readFeatureAllocations(root)).toEqual({ features: {} });
   });
 
@@ -120,7 +120,11 @@ describe('up and down command integration', () => {
     });
 
     expect((await runRail(root, 'up', 'demo', '--no-refresh', '--skip-setup')).exitCode).toBe(0);
-    expect(readFeatureAllocations(root).features.demo).toEqual({ index: 0, setupSkipped: true });
+    expect(readFeatureAllocations(root).features.demo).toEqual({
+      index: 0,
+      path: join(realpathSync(root), 'trees', 'test-project', 'demo'),
+      setupSkipped: true,
+    });
 
     const result = await runRail(root, 'down', 'demo');
 

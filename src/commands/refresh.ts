@@ -1,6 +1,7 @@
 import { defineCommand } from 'citty';
 import { loadConfig } from '../lib/config';
-import { getVcsDriver, gitVcsDriver } from '../lib/vcs';
+import { resolveRailRuntime } from '../lib/paths';
+import { getVcsDriver } from '../lib/vcs';
 
 export default defineCommand({
   meta: {
@@ -15,8 +16,9 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    const root = await gitVcsDriver.resolveProjectRoot();
-    const config = loadConfig(root);
+    const runtime = await resolveRailRuntime();
+    const root = runtime.parentRoot;
+    const config = loadConfig({ parentRoot: runtime.parentRoot, configRoot: runtime.configRoot });
     await getVcsDriver(config.vcs).refreshParent(root, args.target ?? config.default_parent);
   },
 });
